@@ -1,6 +1,6 @@
 {
   "name": "doctreen",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Auto-generates and serves API documentation for Node.js backends via middleware",
   "main": "src/index.js",
   "types": "src/index.d.ts",
@@ -26,6 +26,14 @@
     "auto-docs"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CanDgrmc/doctreen.git"
+  },
+  "homepage": "https://github.com/CanDgrmc/doctreen#readme",
+  "bugs": {
+    "url": "https://github.com/CanDgrmc/doctreen/issues"
+  },
   "engines": {
     "node": ">=14.0.0"
   },
