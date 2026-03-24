@@ -2,7 +2,7 @@
 
 Auto-generate and serve interactive API documentation for your Node.js backend — zero configuration, zero runtime dependencies.
 
-DocTreen introspects your Express app at runtime, parses your JSDoc comments, and serves a fully interactive documentation UI at `/docs`.
+DocTreen introspects your Express or Fastify app at runtime, parses your JSDoc comments, and serves a fully interactive documentation UI at `/docs`.
 
 ---
 
@@ -16,6 +16,8 @@ npm install doctreen
 
 ## Quick Start
 
+### Express
+
 ```js
 const express = require('express');
 const { expressAdapter } = require('doctreen/express');
@@ -23,40 +25,49 @@ const { expressAdapter } = require('doctreen/express');
 const app = express();
 app.use(express.json());
 
-// Mount the docs middleware
+// Define routes first, then mount the docs middleware
+app.get('/users', (req, res) => res.json([]));
+
 app.use(expressAdapter(app, {
-  meta: {
-    title: 'My API',
-    version: '1.0.0',
-    description: 'My project API documentation',
-  },
+  meta: { title: 'My API', version: '1.0.0' },
 }));
 
-// Your routes
-app.get('/users', (req, res) => {
-  res.json([]);
-});
-
-app.listen(3000, () => {
-  console.log('API docs at http://localhost:3000/docs');
-});
+app.listen(3000, () => console.log('API docs at http://localhost:3000/docs'));
 ```
 
-Visit `http://localhost:3000/docs` to see your documentation.
+### Fastify
+
+```js
+const fastify = require('fastify')();
+const { fastifyAdapter } = require('doctreen/fastify');
+
+// Call BEFORE registering routes — uses the onRoute hook
+fastifyAdapter(fastify, {
+  docsPath: '/api/docs',
+  meta: { title: 'My API', version: '1.0.0' },
+});
+
+fastify.get('/users', async (req, reply) => reply.send([]));
+
+fastify.listen({ port: 3000 }, () => console.log('API docs at http://localhost:3000/api/docs'));
+```
+
+Visit the configured `docsPath` to see your documentation.
 
 ---
 
 ## Configuration
 
-Pass a config object as the second argument to `expressAdapter`:
+The same config object is accepted by both `expressAdapter` and `fastifyAdapter`:
 
 ```js
+// Express
 app.use(expressAdapter(app, {
-  docsPath: '/docs',          // URL path for the docs UI (default: '/docs')
-  enabled: true,              // Show docs at all (default: NODE_ENV !== 'production')
-  liveReload: false,          // Re-introspect on every /docs hit (default: false)
-  exclude: ['/health'],       // Paths to hide from docs (string or RegExp)
-  groups: {                   // Group routes under named sections
+  docsPath: '/docs',
+  enabled: true,
+  liveReload: false,
+  exclude: ['/health'],
+  groups: {
     Users: ['/users', '/users/:id'],
     Products: '/products',
   },
@@ -66,6 +77,12 @@ app.use(expressAdapter(app, {
     description: 'Full description shown in the UI header',
   },
 }));
+
+// Fastify (same options)
+fastifyAdapter(fastify, {
+  docsPath: '/api/docs',
+  meta: { title: 'My API', version: '1.0.0' },
+});
 ```
 
 ### Config Options
@@ -191,10 +208,10 @@ app.get('/users/:id', (req, res) => { /* ... */ });
 
 ## Explicit Route Definition with `defineRoute`
 
-For full control over how a route appears in the docs, wrap your handler with `defineRoute`:
+For full control over how a route appears in the docs, wrap your handler with `defineRoute`. Works the same for both Express and Fastify:
 
 ```js
-const { defineRoute, s } = require('doctreen/express');
+const { defineRoute, s } = require('doctreen/express'); // or 'doctreen/fastify'
 
 app.post('/users', defineRoute(
   (req, res) => {
@@ -216,7 +233,32 @@ app.post('/users', defineRoute(
 ));
 ```
 
-`defineRoute` takes priority over JSDoc, which takes priority over runtime inference.
+`defineRoute` takes priority over JSDoc, which takes priority over runtime inference (Express) or Fastify native JSON Schema.
+
+### Fastify Native JSON Schema
+
+If you use Fastify's built-in `schema` option on a route, DocTreen reads it automatically — no `defineRoute` needed:
+
+```js
+fastify.get('/users/:id', {
+  schema: {
+    description: 'Get a user by ID',
+    response: {
+      200: {
+        type: 'object',
+        properties: {
+          id:    { type: 'number' },
+          name:  { type: 'string' },
+          email: { type: 'string' },
+        },
+      },
+    },
+  },
+  handler: async (req, reply) => { /* ... */ },
+});
+```
+
+The `body`, `querystring`, `response`, and `description` fields from the Fastify schema are all converted to DocTreen's internal schema format and shown in the UI. `defineRoute` takes priority over native schema if both are present.
 
 ### Error Responses
 
@@ -267,19 +309,21 @@ DocTreen ships declaration files alongside the JavaScript — no build step, no 
 ### Quick Start (TypeScript)
 
 ```ts
+// Express
 import express from 'express';
 import { expressAdapter } from 'doctreen/express';
-import { defineSchema, defineRoute, s, UserConfig } from 'doctreen';
+import { s, UserConfig } from 'doctreen';
 
 const app = express();
 app.use(express.json());
+app.use(expressAdapter(app, { meta: { title: 'My API', version: '1.0.0' } }));
 
-const config: UserConfig = {
-  meta: { title: 'My API', version: '1.0.0' },
-  groups: { Users: ['/users', '/users/:id'] },
-};
+// Fastify
+import Fastify from 'fastify';
+import { fastifyAdapter } from 'doctreen/fastify';
 
-app.use(expressAdapter(app, config));
+const fastify = Fastify();
+fastifyAdapter(fastify, { docsPath: '/api/docs', meta: { title: 'My API', version: '1.0.0' } });
 ```
 
 ### Typed Schemas
@@ -333,30 +377,45 @@ import type {
 } from 'doctreen';
 
 import type { RouteSchemas, ExpressLike } from 'doctreen/express';
+import type { RouteSchemas, FastifyLike } from 'doctreen/fastify';
 ```
 
-`ExpressLike` is a structural interface — `@types/express` is optional.
+`ExpressLike` and `FastifyLike` are structural interfaces — `@types/express` / `@types/fastify` are optional.
 
 ---
 
 ## How It Works
 
+### Express
 1. `expressAdapter(app, config)` registers a middleware at `docsPath`
 2. On the first request to `/docs`, DocTreen walks `app._router.stack` to discover all registered routes (lazy introspection — solves the middleware-before-routes ordering problem)
-3. JSDoc comments on handler functions are parsed at runtime via `fn.toString()`
-4. Named schemas registered with `defineSchema` are resolved when referenced in JSDoc tags
+3. Route handlers are wrapped so real HTTP traffic populates request/response schemas automatically
+4. JSDoc comments on handler functions are parsed at runtime via `fn.toString()`
 5. The UI is served as a self-contained HTML page with zero external dependencies
+
+### Fastify
+1. `fastifyAdapter(fastify, config)` registers a Fastify `onRoute` hook and adds the docs GET route
+2. Every route added after `fastifyAdapter` is captured by the hook at registration time — no traffic needed
+3. Schema resolution order: `defineRoute` → Fastify native JSON Schema → JSDoc block comment
+4. Named schemas registered with `defineSchema` are resolved when referenced in JSDoc tags
 
 ---
 
-## Example App
+## Example Apps
 
 ```bash
-npm run example
-# → http://localhost:3000/docs
+npm run example             # Express JS    → http://localhost:3000/api/docs
+npm run example:ts          # Express TS    → http://localhost:3000/api/docs
+npm run example:fastify     # Fastify JS    → http://localhost:3001/api/docs
+npm run example:fastify:ts  # Fastify TS    → http://localhost:3001/api/docs
 ```
 
-See [`example/app.js`](./example/app.js) for a full working demo with schemas, groups, JSDoc, and multiple route types.
+| File | Framework | Notes |
+|------|-----------|-------|
+| [`example/app.js`](./example/app.js) | Express | JSDoc, `defineRoute`, named schemas, error responses |
+| [`example/app.ts`](./example/app.ts) | Express | Fully typed with `defineRoute` generics |
+| [`example/fastify-app.js`](./example/fastify-app.js) | Fastify | JSDoc, `defineRoute`, Fastify native JSON Schema |
+| [`example/fastify-app.ts`](./example/fastify-app.ts) | Fastify | Fully typed with Fastify route generics |
 
 ---
 
