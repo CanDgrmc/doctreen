@@ -4,6 +4,8 @@ Auto-generate and serve interactive API documentation for your Node.js backend â
 
 DocTreen introspects your Express, Fastify, Hono, or Koa app at runtime, parses your JSDoc comments, and serves a fully interactive documentation UI at `/docs`.
 
+![DocTreen UI](./example/doctreen-img.png)
+
 ---
 
 ## Installation
