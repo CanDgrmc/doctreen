@@ -16,13 +16,25 @@
     "./fastify": {
       "types": "./src/adapters/fastify.d.ts",
       "default": "./src/adapters/fastify.js"
+    },
+    "./hono": {
+      "types": "./src/adapters/hono.d.ts",
+      "default": "./src/adapters/hono.js"
+    },
+    "./koa": {
+      "types": "./src/adapters/koa.d.ts",
+      "default": "./src/adapters/koa.js"
     }
   },
   "scripts": {
     "example": "node example/app.js",
     "example:ts": "npx tsx example/app.ts",
     "example:fastify": "node example/fastify-app.js",
-    "example:fastify:ts": "npx tsx example/fastify-app.ts"
+    "example:fastify:ts": "npx tsx example/fastify-app.ts",
+    "example:hono": "npx tsx example/hono-app.js",
+    "example:hono:ts": "npx tsx example/hono-app.ts",
+    "example:koa": "node example/koa-app.js",
+    "example:koa:ts": "npx tsx example/koa-app.ts"
   },
   "keywords": [
     "api",
@@ -30,6 +42,8 @@
     "middleware",
     "express",
     "fastify",
+    "hono",
+    "koa",
     "auto-docs"
   ],
   "license": "MIT",
@@ -44,10 +58,20 @@
   "engines": {
     "node": ">=14.0.0"
   },
+  "overrides": {
+    "is-generator-function": "1.0.7"
+  },
   "devDependencies": {
+    "@hono/node-server": "^1.13.0",
+    "@koa/bodyparser": "^5.1.0",
+    "@koa/router": "^13.0.0",
     "@types/express": "^5.0.6",
+    "@types/koa": "^2.15.0",
+    "@types/koa__router": "^12.0.0",
     "express": "^4.18.0",
     "fastify": "^4.28.0",
+    "hono": "^4.7.0",
+    "koa": "^2.15.0",
     "tsx": "^4.21.0"
   }
 }

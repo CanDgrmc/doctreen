@@ -2,7 +2,7 @@
 
 Auto-generate and serve interactive API documentation for your Node.js backend — zero configuration, zero runtime dependencies.
 
-DocTreen introspects your Express or Fastify app at runtime, parses your JSDoc comments, and serves a fully interactive documentation UI at `/docs`.
+DocTreen introspects your Express, Fastify, Hono, or Koa app at runtime, parses your JSDoc comments, and serves a fully interactive documentation UI at `/docs`.
 
 ---
 
@@ -52,13 +52,59 @@ fastify.get('/users', async (req, reply) => reply.send([]));
 fastify.listen({ port: 3000 }, () => console.log('API docs at http://localhost:3000/api/docs'));
 ```
 
+### Hono
+
+```js
+// hono-app.js — run with: npx tsx hono-app.js  (Hono v4 is ESM-only)
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
+import { honoAdapter } from 'doctreen/hono';
+
+const app = new Hono();
+
+app.get('/users', (c) => c.json([]));
+
+// Can be called before or after routes — reads lazily at first request
+honoAdapter(app, {
+  docsPath: '/api/docs',
+  meta: { title: 'My API', version: '1.0.0' },
+});
+
+serve({ fetch: app.fetch, port: 3000 });
+```
+
+> **Note**: Hono v4 is ESM-only. Run `.js` files with `npx tsx` or use `.ts` files directly.
+
+### Koa
+
+```js
+const Koa    = require('koa');
+const Router = require('@koa/router');
+const { koaAdapter } = require('doctreen/koa');
+
+const app    = new Koa();
+const router = new Router();
+
+router.get('/users', (ctx) => { ctx.body = []; });
+
+// Can be called before or after routes — reads lazily at first request
+koaAdapter(router, {
+  docsPath: '/api/docs',
+  meta: { title: 'My API', version: '1.0.0' },
+});
+
+app.use(router.routes());
+app.use(router.allowedMethods());
+app.listen(3000, () => console.log('API docs at http://localhost:3000/api/docs'));
+```
+
 Visit the configured `docsPath` to see your documentation.
 
 ---
 
 ## Configuration
 
-The same config object is accepted by both `expressAdapter` and `fastifyAdapter`:
+The same config object is accepted by `expressAdapter`, `fastifyAdapter`, `honoAdapter`, and `koaAdapter`:
 
 ```js
 // Express
@@ -208,10 +254,11 @@ app.get('/users/:id', (req, res) => { /* ... */ });
 
 ## Explicit Route Definition with `defineRoute`
 
-For full control over how a route appears in the docs, wrap your handler with `defineRoute`. Works the same for both Express and Fastify:
+For full control over how a route appears in the docs, wrap your handler with `defineRoute`. Works the same across all adapters:
 
 ```js
-const { defineRoute, s } = require('doctreen/express'); // or 'doctreen/fastify'
+const { defineRoute, s } = require('doctreen/express'); // or 'doctreen/fastify' / 'doctreen/koa'
+// import { defineRoute, s } from 'doctreen/hono';       // Hono (ESM)
 
 app.post('/users', defineRoute(
   (req, res) => {
@@ -324,6 +371,23 @@ import { fastifyAdapter } from 'doctreen/fastify';
 
 const fastify = Fastify();
 fastifyAdapter(fastify, { docsPath: '/api/docs', meta: { title: 'My API', version: '1.0.0' } });
+
+// Hono
+import { Hono } from 'hono';
+import { honoAdapter } from 'doctreen/hono';
+
+const honoApp = new Hono();
+honoAdapter(honoApp, { docsPath: '/api/docs', meta: { title: 'My API', version: '1.0.0' } });
+
+// Koa
+import Koa from 'koa';
+import Router from '@koa/router';
+import { koaAdapter } from 'doctreen/koa';
+
+const koaApp    = new Koa();
+const koaRouter = new Router();
+koaAdapter(koaRouter, { docsPath: '/api/docs', meta: { title: 'My API', version: '1.0.0' } });
+koaApp.use(koaRouter.routes());
 ```
 
 ### Typed Schemas
@@ -376,11 +440,13 @@ import type {
   RouteRegistry,
 } from 'doctreen';
 
-import type { RouteSchemas, ExpressLike } from 'doctreen/express';
-import type { RouteSchemas, FastifyLike } from 'doctreen/fastify';
+import type { RouteSchemas, ExpressLike }   from 'doctreen/express';
+import type { RouteSchemas, FastifyLike }   from 'doctreen/fastify';
+import type { RouteSchemas, HonoLike }      from 'doctreen/hono';
+import type { RouteSchemas, KoaRouterLike } from 'doctreen/koa';
 ```
 
-`ExpressLike` and `FastifyLike` are structural interfaces — `@types/express` / `@types/fastify` are optional.
+`ExpressLike`, `FastifyLike`, `HonoLike`, and `KoaRouterLike` are structural interfaces — framework `@types/*` packages are optional.
 
 ---
 
@@ -399,6 +465,20 @@ import type { RouteSchemas, FastifyLike } from 'doctreen/fastify';
 3. Schema resolution order: `defineRoute` → Fastify native JSON Schema → JSDoc block comment
 4. Named schemas registered with `defineSchema` are resolved when referenced in JSDoc tags
 
+### Hono
+1. `honoAdapter(app, config)` adds a GET route at `docsPath` to the Hono app
+2. On the first request to the docs page, `app.routes` is read — all routes registered by then are shown
+3. Can be called **before or after** your routes (lazy read at request time)
+4. Schema resolution order: `defineRoute` → JSDoc block comment
+5. Works on any runtime: Node.js (via `@hono/node-server`), Bun, Deno, Cloudflare Workers
+
+### Koa
+1. `koaAdapter(router, config)` adds a GET route at `docsPath` to the `@koa/router` instance
+2. On the first request to the docs page, `router.stack` is read — all routes registered by then are shown
+3. Can be called **before or after** your routes (lazy read at request time)
+4. Schema resolution order: `defineRoute` → JSDoc block comment
+5. Mount the router on the Koa app as usual: `app.use(router.routes())`
+
 ---
 
 ## Example Apps
@@ -408,6 +488,10 @@ npm run example             # Express JS    → http://localhost:3000/api/docs
 npm run example:ts          # Express TS    → http://localhost:3000/api/docs
 npm run example:fastify     # Fastify JS    → http://localhost:3001/api/docs
 npm run example:fastify:ts  # Fastify TS    → http://localhost:3001/api/docs
+npm run example:hono        # Hono JS       → http://localhost:3002/api/docs
+npm run example:hono:ts     # Hono TS       → http://localhost:3002/api/docs
+npm run example:koa         # Koa JS        → http://localhost:3003/api/docs
+npm run example:koa:ts      # Koa TS        → http://localhost:3003/api/docs
 ```
 
 | File | Framework | Notes |
@@ -416,6 +500,10 @@ npm run example:fastify:ts  # Fastify TS    → http://localhost:3001/api/docs
 | [`example/app.ts`](./example/app.ts) | Express | Fully typed with `defineRoute` generics |
 | [`example/fastify-app.js`](./example/fastify-app.js) | Fastify | JSDoc, `defineRoute`, Fastify native JSON Schema |
 | [`example/fastify-app.ts`](./example/fastify-app.ts) | Fastify | Fully typed with Fastify route generics |
+| [`example/hono-app.js`](./example/hono-app.js) | Hono | JSDoc, `defineRoute`; run via `npx tsx` |
+| [`example/hono-app.ts`](./example/hono-app.ts) | Hono | Fully typed with Hono `Context` |
+| [`example/koa-app.js`](./example/koa-app.js) | Koa | JSDoc, `defineRoute`; uses `@koa/router` |
+| [`example/koa-app.ts`](./example/koa-app.ts) | Koa | Fully typed with `Router.RouterContext` |
 
 ---
 
