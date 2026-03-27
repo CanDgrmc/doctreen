@@ -453,11 +453,84 @@ function renderFlowSections(flows) {
       </div>
       <span class="group-count-badge">${flows.length} flow${flows.length !== 1 ? 's' : ''}</span>
     </div>
-    <div class="flow-info-card">
-      <div class="flow-info-header">
-        <h3 class="flow-info-title">How To Create Flows</h3>
-        <span class="flow-info-badge">Guide</span>
+    <div class="flow-creator-card" id="flow-creator-card">
+      <div class="flow-creator-header">
+        <div>
+          <h3 class="flow-creator-title">Flow Creator</h3>
+          <p class="flow-creator-desc">Select documented routes, configure steps, and export a reusable flow JSON draft.</p>
+        </div>
+        <span class="flow-info-badge">Builder</span>
       </div>
+      <div class="flow-creator-grid">
+        <label class="flow-input-row">
+          <span class="flow-input-label">Flow name</span>
+          <input class="flow-input" id="creator-flow-name" placeholder="User onboarding" />
+        </label>
+        <label class="flow-input-row">
+          <span class="flow-input-label">Description</span>
+          <input class="flow-input" id="creator-flow-description" placeholder="Create, fetch, and verify a user." />
+        </label>
+        <label class="flow-input-row">
+          <span class="flow-input-label">baseUrl template</span>
+          <input class="flow-base-url" id="creator-flow-base-url" placeholder="{{env.baseUrl}}" />
+        </label>
+        <label class="flow-input-row">
+          <span class="flow-input-label">Environment JSON</span>
+          <textarea class="creator-step-textarea" id="creator-flow-env">{
+  "baseUrl": "http://localhost:3000"
+}</textarea>
+        </label>
+        <label class="flow-input-row creator-step-full">
+          <span class="flow-input-label">Inputs JSON</span>
+          <textarea class="creator-step-textarea" id="creator-flow-inputs">{
+  "email": { "type": "string", "required": true }
+}</textarea>
+        </label>
+      </div>
+      <div class="flow-creator-toolbar">
+        <select class="flow-route-select" id="creator-route-select">
+          <option value="">Select a documented route…</option>
+        </select>
+        <button class="creator-add-step-btn" id="creator-add-step-btn" type="button">Add route as step</button>
+        <button class="creator-export-btn" id="creator-export-btn" type="button">Export flow JSON</button>
+        <span class="creator-helper-status" id="creator-helper-status">Pick route steps, then insert <code>{{input.*}}</code>, <code>{{env.*}}</code>, or prior <code>{{vars.*}}</code> into the focused field.</span>
+      </div>
+      <div class="flow-creator-layout">
+        <div class="flow-creator-panel">
+          <div class="detail-col-title">Draft Steps</div>
+          <div class="creator-step-list" id="creator-step-list">
+            <div class="flow-empty-note">No steps yet. Pick a route and add it to the flow.</div>
+          </div>
+        </div>
+        <div class="flow-creator-panel">
+          <div class="detail-col-title">Generated JSON</div>
+          <pre class="flow-result is-active" id="creator-flow-json">{
+  "version": 1,
+  "name": "",
+  "description": "",
+  "baseUrl": "{{env.baseUrl}}",
+  "env": {
+    "baseUrl": "http://localhost:3000"
+  },
+  "inputs": {
+    "email": { "type": "string", "required": true }
+  },
+  "steps": []
+}</pre>
+        </div>
+      </div>
+    </div>
+    <div class="flow-info-card is-collapsed" id="flow-info-card">
+      <button class="flow-info-toggle" id="flow-info-toggle" type="button" aria-expanded="false">
+        <span class="flow-info-header">
+          <span class="flow-info-title-wrap">
+            <h3 class="flow-info-title">How To Create Flows</h3>
+            <span class="flow-info-badge">Guide</span>
+          </span>
+          <span class="flow-info-toggle-text">Expand</span>
+        </span>
+      </button>
+      <div class="flow-info-content">
       <div class="flow-info-grid">
         <div class="flow-info-block">
           <div class="flow-info-block-title">1. Start With A Scenario</div>
@@ -571,6 +644,7 @@ function renderFlowSections(flows) {
         </div>
       </div>
       <p class="flow-info-footnote">Store flow files in <code>doctreen-flows/*.json</code> or configure <code>flowsPath</code>. The same definition can be run here in the docs UI or headlessly with <code>doctreen-flow run ...</code>.</p>
+      </div>
     </div>
     <div class="flow-list">`;
 
@@ -677,6 +751,7 @@ function serveDocsUI(routes, config, options) {
   const totalRoutes = routes.length;
   const liveCount   = routes.filter((r) => r.requestSchema !== null || r.responseSchema !== null).length;
   const flows       = Array.isArray(options.flows) ? options.flows : [];
+  const totalFlows  = flows.length;
 
   const groups         = groupRoutes(routes);
   const sidebarHtml    = renderSidebar(groups);
@@ -988,6 +1063,175 @@ function serveDocsUI(routes, config, options) {
     }
     .route-group:last-child { margin-bottom: 0; }
     .flow-group { margin-top: 40px; }
+    .flow-creator-card {
+      background: linear-gradient(180deg, rgba(72,187,120,0.08), rgba(26,31,46,0.98));
+      border: 1px solid rgba(72,187,120,0.2);
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 18px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    }
+    .flow-creator-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .flow-creator-title {
+      font-size: 1rem;
+      color: #d9f99d;
+      margin: 0 0 4px;
+    }
+    .flow-creator-desc {
+      font-size: 0.78rem;
+      color: #cbd5e0;
+      line-height: 1.6;
+    }
+    .flow-creator-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .flow-creator-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .flow-route-select {
+      flex: 1;
+      min-width: 220px;
+      padding: 8px 10px;
+      background: rgba(0,0,0,0.18);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.8rem;
+      outline: none;
+    }
+    .creator-add-step-btn, .creator-export-btn, .creator-remove-step-btn {
+      padding: 7px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-detail);
+      color: var(--text);
+      font-size: 0.76rem;
+      cursor: pointer;
+    }
+    .creator-add-step-btn:hover { border-color: rgba(72,187,120,0.5); color: #68d391; }
+    .creator-export-btn:hover { border-color: rgba(99,179,237,0.5); color: #63b3ed; }
+    .creator-remove-step-btn:hover { border-color: rgba(245,101,101,0.5); color: #fc8181; }
+    .creator-helper-status {
+      font-size: 0.73rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .flow-creator-layout {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 14px;
+    }
+    .flow-creator-panel {
+      background: rgba(0,0,0,0.14);
+      border: 1px solid var(--border-sub);
+      border-radius: 10px;
+      padding: 12px;
+      min-width: 0;
+    }
+    .creator-step-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .creator-step-card {
+      border: 1px solid var(--border-sub);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.02);
+      padding: 12px;
+    }
+    .creator-step-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .creator-step-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .creator-step-index {
+      color: var(--text-dim);
+      font-size: 0.72rem;
+      min-width: 18px;
+    }
+    .creator-step-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .creator-step-full {
+      grid-column: 1 / -1;
+    }
+    .creator-step-textarea {
+      width: 100%;
+      min-height: 84px;
+      padding: 8px 10px;
+      background: rgba(0,0,0,0.18);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.76rem;
+      outline: none;
+      resize: vertical;
+      font-family: 'SFMono-Regular', Consolas, monospace;
+    }
+    .creator-helper-block {
+      display: grid;
+      gap: 10px;
+    }
+    .creator-helper-section {
+      background: rgba(0,0,0,0.14);
+      border: 1px solid var(--border-sub);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .creator-helper-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #93c5fd;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .creator-helper-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .creator-placeholder-btn {
+      padding: 6px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+      color: var(--text);
+      font-size: 0.72rem;
+      cursor: pointer;
+    }
+    .creator-placeholder-btn:hover {
+      border-color: rgba(99,179,237,0.45);
+      color: #93c5fd;
+    }
+    .creator-helper-note {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
     .flow-info-card {
       background: linear-gradient(180deg, rgba(66,153,225,0.08), rgba(26,31,46,0.98));
       border: 1px solid rgba(66,153,225,0.22);
@@ -996,12 +1240,28 @@ function serveDocsUI(routes, config, options) {
       margin-bottom: 18px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.2);
     }
+    .flow-info-card.is-collapsed .flow-info-content { display: none; }
+    .flow-info-toggle {
+      width: 100%;
+      background: none;
+      border: none;
+      color: inherit;
+      padding: 0;
+      cursor: pointer;
+      text-align: left;
+    }
     .flow-info-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      margin-bottom: 12px;
+      margin-bottom: 0;
+    }
+    .flow-info-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
     }
     .flow-info-title {
       font-size: 1rem;
@@ -1019,6 +1279,13 @@ function serveDocsUI(routes, config, options) {
       font-weight: 700;
       letter-spacing: 0.04em;
     }
+    .flow-info-toggle-text {
+      color: #93c5fd;
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .flow-info-content { margin-top: 12px; }
     .flow-info-grid, .flow-info-subgrid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1714,7 +1981,7 @@ function serveDocsUI(routes, config, options) {
       flex-shrink: 0;
     }
     @media (max-width: 900px) {
-      .flow-info-grid, .flow-info-subgrid, .flow-step-sections {
+      .flow-info-grid, .flow-info-subgrid, .flow-step-sections, .flow-creator-grid, .flow-creator-layout, .creator-step-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -1731,6 +1998,7 @@ function serveDocsUI(routes, config, options) {
     <div class="header-meta">
       <span class="badge badge-version">v${escapeHtml(meta.version)}</span>
       <span class="badge badge-count">${totalRoutes} route${totalRoutes !== 1 ? 's' : ''}</span>
+      ${totalFlows > 0 ? `<span class="badge badge-count">${totalFlows} flow${totalFlows !== 1 ? 's' : ''}</span>` : ''}
       ${liveCount > 0 ? `<span class="badge badge-live">${liveCount} with schemas</span>` : ''}
       <button id="export-postman-btn" class="export-postman-btn">Export to Postman</button>
     </div>
@@ -1773,6 +2041,19 @@ function serveDocsUI(routes, config, options) {
   var sidebarNav  = document.getElementById('sidebar-nav');
   var sidebarFlowNav = document.getElementById('sidebar-flow-nav');
   var headerTabs = document.getElementById('header-tabs');
+  var flowInfoCard = document.getElementById('flow-info-card');
+  var flowInfoToggle = document.getElementById('flow-info-toggle');
+  var creatorFlowName = document.getElementById('creator-flow-name');
+  var creatorFlowDescription = document.getElementById('creator-flow-description');
+  var creatorFlowBaseUrl = document.getElementById('creator-flow-base-url');
+  var creatorFlowEnv = document.getElementById('creator-flow-env');
+  var creatorFlowInputs = document.getElementById('creator-flow-inputs');
+  var creatorRouteSelect = document.getElementById('creator-route-select');
+  var creatorAddStepBtn = document.getElementById('creator-add-step-btn');
+  var creatorExportBtn = document.getElementById('creator-export-btn');
+  var creatorStepList = document.getElementById('creator-step-list');
+  var creatorFlowJson = document.getElementById('creator-flow-json');
+  var creatorHelperStatus = document.getElementById('creator-helper-status');
   var searchInput = document.getElementById('search');
   var ROUTES = ${JSON.stringify(routes)};
   var FLOWS = ${JSON.stringify(flows)};
@@ -1783,6 +2064,15 @@ function serveDocsUI(routes, config, options) {
     return acc;
   }, { OTHER: 'method-other' }))};
   var activePane = 'routes';
+  var creatorState = {
+    name: '',
+    description: '',
+    baseUrl: '{{env.baseUrl}}',
+    env: { baseUrl: window.location.origin },
+    inputs: { email: { type: 'string', required: true } },
+    steps: [],
+    focus: null
+  };
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
   function setActivePane(pane) {
@@ -1902,6 +2192,74 @@ function serveDocsUI(routes, config, options) {
       setActivePane(tabBtn.getAttribute('data-pane') || 'routes');
     });
   }
+
+  if (flowInfoToggle && flowInfoCard) {
+    flowInfoToggle.addEventListener('click', function () {
+      var collapsed = flowInfoCard.classList.toggle('is-collapsed');
+      flowInfoToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      var label = flowInfoToggle.querySelector('.flow-info-toggle-text');
+      if (label) label.textContent = collapsed ? 'Expand' : 'Collapse';
+    });
+  }
+
+  if (creatorFlowName) {
+    creatorFlowName.addEventListener('input', function () {
+      creatorState.name = this.value;
+      syncCreatorPreview();
+    });
+  }
+  if (creatorFlowDescription) {
+    creatorFlowDescription.addEventListener('input', function () {
+      creatorState.description = this.value;
+      syncCreatorPreview();
+    });
+  }
+  if (creatorFlowBaseUrl) {
+    creatorFlowBaseUrl.value = creatorState.baseUrl;
+    creatorState.baseUrl = creatorFlowBaseUrl.value;
+    creatorFlowBaseUrl.addEventListener('input', function () {
+      creatorState.baseUrl = this.value;
+      syncCreatorPreview();
+    });
+  }
+  if (creatorFlowEnv) {
+    creatorFlowEnv.value = JSON.stringify(creatorState.env, null, 2);
+    creatorFlowEnv.addEventListener('input', function () {
+      creatorState.env = safeJsonParse(this.value, creatorState.env || {});
+      syncCreatorPreview();
+    });
+  }
+  if (creatorFlowInputs) {
+    creatorFlowInputs.value = JSON.stringify(creatorState.inputs, null, 2);
+    creatorFlowInputs.addEventListener('input', function () {
+      creatorState.inputs = safeJsonParse(this.value, creatorState.inputs || {});
+      syncCreatorPreview();
+    });
+  }
+  if (creatorAddStepBtn && creatorRouteSelect) {
+    creatorAddStepBtn.addEventListener('click', function () {
+      var idx = Number(creatorRouteSelect.value);
+      if (!Number.isInteger(idx) || !ROUTES[idx]) return;
+      creatorState.steps.push(routeToDraftStep(ROUTES[idx], creatorState.steps.length));
+      renderCreatorSteps();
+    });
+  }
+  if (creatorExportBtn) {
+    creatorExportBtn.addEventListener('click', function () {
+      var json = JSON.stringify(buildCreatorFlowObject(), null, 2);
+      var blob = new Blob([json], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = slugifyStepId(creatorState.name || 'flow') + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  }
+  populateCreatorRoutes();
+  renderCreatorSteps();
 
   // ── Sidebar active group via IntersectionObserver ────────────────────────────
   var sections   = content.querySelectorAll('.route-group');
@@ -2405,6 +2763,268 @@ function serveDocsUI(routes, config, options) {
     jsonEl.classList.toggle('is-fail', !(requestOk && result.ok));
   }
 
+  function safeJsonParse(raw, fallback) {
+    if (!raw || !raw.trim()) return fallback;
+    try { return JSON.parse(raw); } catch (_error) { return fallback; }
+  }
+
+  function setCreatorStatus(message) {
+    if (creatorHelperStatus) creatorHelperStatus.innerHTML = message;
+  }
+
+  function slugifyStepId(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'step';
+  }
+
+  function insertValueIntoField(field, value) {
+    if (!field) return false;
+
+    var start = typeof field.selectionStart === 'number' ? field.selectionStart : String(field.value || '').length;
+    var end = typeof field.selectionEnd === 'number' ? field.selectionEnd : start;
+    var current = String(field.value || '');
+    field.value = current.slice(0, start) + value + current.slice(end);
+    var cursor = start + value.length;
+    if (typeof field.setSelectionRange === 'function') field.setSelectionRange(cursor, cursor);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.focus();
+    return true;
+  }
+
+  function copyTextValue(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(function () {
+        fallbackCopy(text, function () {});
+      });
+    }
+    fallbackCopy(text, function () {});
+    return Promise.resolve();
+  }
+
+  function schemaFieldPaths(node, prefix) {
+    prefix = prefix || '';
+    if (!node) return [];
+
+    if (node.type === 'object' && node.properties) {
+      return Object.keys(node.properties).reduce(function (acc, key) {
+        var next = prefix ? prefix + '.' + key : key;
+        var child = node.properties[key];
+        acc.push(next);
+        return acc.concat(schemaFieldPaths(child, next));
+      }, []);
+    }
+
+    if (node.type === 'array' && node.items) {
+      var arrayPrefix = prefix ? prefix + '[0]' : '[0]';
+      return [arrayPrefix].concat(schemaFieldPaths(node.items, arrayPrefix));
+    }
+
+    return [];
+  }
+
+  function ensureExtractVar(priorStep, fieldPath) {
+    var selector = '$.' + fieldPath;
+    var existing = Object.keys(priorStep.extract || {}).find(function (key) {
+      var rule = priorStep.extract[key];
+      return rule && typeof rule === 'object' && rule.from === 'body' && rule.path === selector;
+    });
+    if (existing) return existing;
+
+    var varName = slugifyStepId(priorStep.id + '-' + fieldPath);
+    priorStep.extract = priorStep.extract || {};
+    priorStep.extract[varName] = { from: 'body', path: selector };
+    return varName;
+  }
+
+  function getPlaceholderGroups(stepIndex) {
+    var groups = {
+      input: Object.keys(creatorState.inputs || {}).map(function (key) {
+        return { label: 'input.' + key, value: '{{input.' + key + '}}' };
+      }),
+      env: Object.keys(creatorState.env || {}).map(function (key) {
+        return { label: 'env.' + key, value: '{{env.' + key + '}}' };
+      }),
+      vars: [],
+      capture: []
+    };
+
+    for (var i = 0; i < stepIndex; i++) {
+      var prior = creatorState.steps[i];
+      if (!prior) continue;
+
+      Object.keys(prior.extract || {}).forEach(function (key) {
+        groups.vars.push({
+          label: prior.id + ' -> vars.' + key,
+          value: '{{vars.' + key + '}}'
+        });
+      });
+
+      ((prior._routeMeta && prior._routeMeta.responseFields) || []).forEach(function (field) {
+        groups.capture.push({
+          label: prior.id + ' -> ' + field,
+          priorIndex: i,
+          fieldPath: field
+        });
+      });
+    }
+
+    return groups;
+  }
+
+  function routeToDraftStep(route, index) {
+    var bodySchema = route.requestSchema && route.requestSchema.body;
+    var querySchema = route.requestSchema && route.requestSchema.query;
+    var query = querySchema && querySchema.properties ? Object.keys(querySchema.properties).reduce(function (acc, key) {
+      acc[key] = '';
+      return acc;
+    }, {}) : {};
+    return {
+      id: slugifyStepId(route.method + '-' + route.path) + '-' + (index + 1),
+      name: route.method + ' ' + route.path,
+      request: {
+        method: route.method,
+        path: route.path,
+        headers: route.requestHeaders ? Object.assign({}, route.requestHeaders) : {},
+        query: query,
+        body: bodySchema ? schemaToExample(bodySchema) : {}
+      },
+      extract: {},
+      assert: { status: route.method === 'POST' ? 201 : 200 },
+      _routeMeta: {
+        params: route.params || [],
+        responseFields: schemaFieldPaths(route.responseSchema, '')
+      }
+    };
+  }
+
+  function buildCreatorFlowObject() {
+    return {
+      version: 1,
+      name: creatorState.name || '',
+      description: creatorState.description || undefined,
+      baseUrl: creatorState.baseUrl || '',
+      env: creatorState.env && Object.keys(creatorState.env).length > 0 ? creatorState.env : undefined,
+      inputs: creatorState.inputs && Object.keys(creatorState.inputs).length > 0 ? creatorState.inputs : undefined,
+      steps: creatorState.steps.map(function (step) {
+        var out = {
+          id: step.id,
+          name: step.name,
+          request: {
+            method: step.request.method,
+            path: step.request.path
+          }
+        };
+        if (step.request.headers && Object.keys(step.request.headers).length > 0) out.request.headers = step.request.headers;
+        if (step.request.query && Object.keys(step.request.query).length > 0) out.request.query = step.request.query;
+        if (step.request.body && Object.keys(step.request.body).length > 0) out.request.body = step.request.body;
+        if (step.extract && Object.keys(step.extract).length > 0) out.extract = step.extract;
+        if (step.assert && Object.keys(step.assert).length > 0) out.assert = step.assert;
+        return out;
+      })
+    };
+  }
+
+  function syncCreatorPreview() {
+    if (creatorFlowJson) {
+      creatorFlowJson.textContent = JSON.stringify(buildCreatorFlowObject(), null, 2);
+    }
+  }
+
+  function renderCreatorSteps() {
+    if (!creatorStepList) return;
+    if (creatorState.steps.length === 0) {
+      creatorStepList.innerHTML = '<div class="flow-empty-note">No steps yet. Pick a route and add it to the flow.</div>';
+      syncCreatorPreview();
+      return;
+    }
+
+    creatorStepList.innerHTML = creatorState.steps.map(function (step, index) {
+      var placeholderGroups = getPlaceholderGroups(index);
+      var paramSourceOptions = placeholderGroups.input.concat(placeholderGroups.env, placeholderGroups.vars).concat(
+        placeholderGroups.capture.map(function (item) {
+          return {
+            label: 'capture ' + item.label,
+            value: '__capture__:' + item.priorIndex + ':' + item.fieldPath
+          };
+        })
+      );
+      var paramHelpers = ((step._routeMeta && step._routeMeta.params) || []).map(function (paramName) {
+        var selectOptions = ['<option value="">Optional: replace this route param…</option>'].concat(paramSourceOptions.map(function (option) {
+          return '<option value="' + escapeHtmlClient(option.value) + '">' + escapeHtmlClient(option.label) + '</option>';
+        }));
+        return (
+          '<label class="flow-input-row">' +
+          '<span class="flow-input-label">Param: ' + escapeHtmlClient(paramName) + '</span>' +
+          '<select class="flow-route-select creator-param-select" data-step-index="' + index + '" data-param-name="' + escapeHtmlClient(paramName) + '">' +
+          selectOptions.join('') +
+          '</select>' +
+          '</label>'
+        );
+      }).join('');
+
+      function renderPlaceholderButtons(items, type) {
+        if (!items || items.length === 0) return '<div class="flow-empty-note">None available yet.</div>';
+        return '<div class="creator-helper-row">' + items.map(function (item) {
+          return '<button class="creator-placeholder-btn" type="button" data-step-index="' + index + '" data-placeholder-type="' + type + '" data-placeholder-value="' + escapeHtmlClient(item.value || '') + '" data-prior-index="' + escapeHtmlClient(String(item.priorIndex == null ? '' : item.priorIndex)) + '" data-field-path="' + escapeHtmlClient(item.fieldPath || '') + '">' + escapeHtmlClient(item.label) + '</button>';
+        }).join('') + '</div>';
+      }
+
+      var helperBlock = paramHelpers || placeholderGroups.input.length > 0 || placeholderGroups.env.length > 0 || placeholderGroups.vars.length > 0 || placeholderGroups.capture.length > 0
+        ? (
+          '<div class="creator-step-full creator-helper-block">' +
+          (paramHelpers ? '<div class="creator-helper-section"><div class="creator-helper-title">Optional route param mapping</div><div class="creator-step-grid">' + paramHelpers + '</div></div>' : '') +
+          '<div class="creator-helper-section"><div class="creator-helper-title">Insert placeholders</div>' +
+          (placeholderGroups.input.length > 0 ? '<div class="creator-helper-note">Inputs</div>' + renderPlaceholderButtons(placeholderGroups.input, 'direct') : '') +
+          (placeholderGroups.env.length > 0 ? '<div class="creator-helper-note">Env</div>' + renderPlaceholderButtons(placeholderGroups.env, 'direct') : '') +
+          (placeholderGroups.vars.length > 0 ? '<div class="creator-helper-note">Existing vars</div>' + renderPlaceholderButtons(placeholderGroups.vars, 'direct') : '') +
+          (placeholderGroups.capture.length > 0 ? '<div class="creator-helper-note">Capture from earlier responses</div>' + renderPlaceholderButtons(placeholderGroups.capture, 'capture') : '') +
+          ((placeholderGroups.input.length + placeholderGroups.env.length + placeholderGroups.vars.length + placeholderGroups.capture.length) === 0 ? '<div class="flow-empty-note">No placeholders available yet.</div>' : '') +
+          '</div>' +
+          '</div>'
+        )
+        : '';
+
+      return (
+        '<div class="creator-step-card" data-step-index="' + index + '">' +
+        '<div class="creator-step-header">' +
+        '<div class="creator-step-title">' +
+        '<span class="creator-step-index">' + (index + 1) + '</span>' +
+        '<span class="method-mini ' + (CLIENT_METHOD_CLASSES[step.request.method] || CLIENT_METHOD_CLASSES.OTHER) + '">' + escapeHtmlClient(step.request.method) + '</span>' +
+        '<span class="flow-step-name">' + escapeHtmlClient(step.name || step.id) + '</span>' +
+        '<span class="flow-step-path-inline">' + escapeHtmlClient(step.request.path) + '</span>' +
+        '</div>' +
+        '<button class="creator-remove-step-btn" data-step-index="' + index + '" type="button">Remove</button>' +
+        '</div>' +
+        '<div class="creator-step-grid">' +
+        '<label class="flow-input-row"><span class="flow-input-label">Step id</span><input class="flow-input creator-step-id" data-step-index="' + index + '" value="' + escapeHtmlClient(step.id) + '" /></label>' +
+        '<label class="flow-input-row"><span class="flow-input-label">Step name</span><input class="flow-input creator-step-name" data-step-index="' + index + '" value="' + escapeHtmlClient(step.name || '') + '" /></label>' +
+        '<label class="flow-input-row"><span class="flow-input-label">Method</span><input class="flow-input creator-step-method" data-step-index="' + index + '" value="' + escapeHtmlClient(step.request.method) + '" /></label>' +
+        '<label class="flow-input-row"><span class="flow-input-label">Path</span><input class="flow-input creator-step-path" data-step-index="' + index + '" value="' + escapeHtmlClient(step.request.path) + '" /></label>' +
+        helperBlock +
+        '<label class="flow-input-row creator-step-full"><span class="flow-input-label">Headers JSON</span><textarea class="creator-step-textarea creator-step-headers" data-step-index="' + index + '">' + escapeHtmlClient(JSON.stringify(step.request.headers || {}, null, 2)) + '</textarea></label>' +
+        '<label class="flow-input-row creator-step-full"><span class="flow-input-label">Query JSON</span><textarea class="creator-step-textarea creator-step-query" data-step-index="' + index + '">' + escapeHtmlClient(JSON.stringify(step.request.query || {}, null, 2)) + '</textarea></label>' +
+        '<label class="flow-input-row creator-step-full"><span class="flow-input-label">Body JSON</span><textarea class="creator-step-textarea creator-step-body" data-step-index="' + index + '">' + escapeHtmlClient(JSON.stringify(step.request.body || {}, null, 2)) + '</textarea></label>' +
+        '<label class="flow-input-row creator-step-full"><span class="flow-input-label">Extract JSON</span><textarea class="creator-step-textarea creator-step-extract" data-step-index="' + index + '">' + escapeHtmlClient(JSON.stringify(step.extract || {}, null, 2)) + '</textarea></label>' +
+        '<label class="flow-input-row creator-step-full"><span class="flow-input-label">Assert JSON</span><textarea class="creator-step-textarea creator-step-assert" data-step-index="' + index + '">' + escapeHtmlClient(JSON.stringify(step.assert || {}, null, 2)) + '</textarea></label>' +
+        '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    syncCreatorPreview();
+  }
+
+  function populateCreatorRoutes() {
+    if (!creatorRouteSelect) return;
+    var options = ['<option value="">Select a documented route…</option>'];
+    ROUTES.forEach(function (route, index) {
+      options.push('<option value="' + index + '">' + escapeHtmlClient(route.method + ' ' + route.path) + '</option>');
+    });
+    creatorRouteSelect.innerHTML = options.join('');
+  }
+
   function collectFlowInputs(card) {
     var input = {};
     card.querySelectorAll('.flow-input').forEach(function (el) {
@@ -2414,7 +3034,58 @@ function serveDocsUI(routes, config, options) {
     return input;
   }
 
+  content.addEventListener('focusin', function (e) {
+    var target = e.target;
+    if (!(target instanceof Element)) return;
+    if (!target.matches('.creator-step-id, .creator-step-name, .creator-step-method, .creator-step-path, .creator-step-headers, .creator-step-query, .creator-step-body, .creator-step-extract, .creator-step-assert')) return;
+
+    var stepIndex = Number(target.getAttribute('data-step-index'));
+    if (!Number.isInteger(stepIndex)) return;
+    creatorState.focus = { stepIndex: stepIndex, element: target };
+    setCreatorStatus('Insert placeholders into the focused field, or use the route-param dropdowns when the step path has <code>:params</code>.');
+  });
+
   content.addEventListener('click', function (e) {
+    var placeholderBtn = e.target.closest('.creator-placeholder-btn');
+    if (placeholderBtn) {
+      var stepIndex = Number(placeholderBtn.getAttribute('data-step-index'));
+      var step = creatorState.steps[stepIndex];
+      if (!step) return;
+
+      var placeholderType = placeholderBtn.getAttribute('data-placeholder-type');
+      var placeholderValue = placeholderBtn.getAttribute('data-placeholder-value');
+      if (placeholderType === 'capture') {
+        var priorIndex = Number(placeholderBtn.getAttribute('data-prior-index'));
+        var fieldPath = placeholderBtn.getAttribute('data-field-path');
+        var priorStep = creatorState.steps[priorIndex];
+        if (!priorStep || !fieldPath) return;
+        var varName = ensureExtractVar(priorStep, fieldPath);
+        placeholderValue = '{{vars.' + varName + '}}';
+      }
+
+      var focus = creatorState.focus;
+      if (focus && focus.stepIndex === stepIndex && focus.element && document.contains(focus.element)) {
+        insertValueIntoField(focus.element, placeholderValue);
+        setCreatorStatus('Inserted <code>' + escapeHtmlClient(placeholderValue) + '</code> into the focused field.');
+      } else {
+        copyTextValue(placeholderValue);
+        setCreatorStatus('Copied <code>' + escapeHtmlClient(placeholderValue) + '</code>. Focus a step field first to insert directly.');
+      }
+
+      renderCreatorSteps();
+      return;
+    }
+
+    var removeStepBtn = e.target.closest('.creator-remove-step-btn');
+    if (removeStepBtn) {
+      var removeIndex = Number(removeStepBtn.getAttribute('data-step-index'));
+      if (Number.isInteger(removeIndex)) {
+        creatorState.steps.splice(removeIndex, 1);
+        renderCreatorSteps();
+      }
+      return;
+    }
+
     var tabBtn = e.target.closest('.flow-result-tab');
     if (tabBtn) {
       var block = tabBtn.closest('.flow-result-block');
@@ -2478,6 +3149,68 @@ function serveDocsUI(routes, config, options) {
       runBtn.disabled = false;
       runBtn.textContent = 'Run flow';
     });
+  });
+
+  content.addEventListener('change', function (e) {
+    var target = e.target;
+    if (!(target instanceof Element)) return;
+
+    if (target.classList.contains('creator-param-select')) {
+      var stepIndex = Number(target.getAttribute('data-step-index'));
+      var paramName = target.getAttribute('data-param-name');
+      var step = creatorState.steps[stepIndex];
+      if (!step || !paramName) return;
+
+      var placeholder = target.value;
+      if (!placeholder) return;
+      if (placeholder.indexOf('__capture__:') === 0) {
+        var parts = placeholder.split(':');
+        var priorIndex = Number(parts[1]);
+        var fieldPath = parts.slice(2).join(':');
+        var priorStep = creatorState.steps[priorIndex];
+        if (!priorStep || !fieldPath) return;
+        placeholder = '{{vars.' + ensureExtractVar(priorStep, fieldPath) + '}}';
+      }
+
+      var pattern = new RegExp(':' + paramName + '(?=/|$)', 'g');
+      step.request.path = String(step.request.path || '').replace(pattern, placeholder);
+      setCreatorStatus('Mapped route param <code>:' + escapeHtmlClient(paramName) + '</code> to <code>' + escapeHtmlClient(placeholder) + '</code>.');
+      renderCreatorSteps();
+      return;
+    }
+  });
+
+  content.addEventListener('input', function (e) {
+    var target = e.target;
+    if (!(target instanceof Element)) return;
+    var stepIndex = Number(target.getAttribute('data-step-index'));
+    if (!Number.isInteger(stepIndex) || !creatorState.steps[stepIndex]) return;
+    var step = creatorState.steps[stepIndex];
+
+    if (target.classList.contains('creator-step-id')) step.id = target.value;
+    else if (target.classList.contains('creator-step-name')) step.name = target.value;
+    else if (target.classList.contains('creator-step-method')) step.request.method = target.value.toUpperCase();
+    else if (target.classList.contains('creator-step-path')) step.request.path = target.value;
+    else if (target.classList.contains('creator-step-headers')) step.request.headers = safeJsonParse(target.value, {});
+    else if (target.classList.contains('creator-step-query')) step.request.query = safeJsonParse(target.value, {});
+    else if (target.classList.contains('creator-step-body')) step.request.body = safeJsonParse(target.value, {});
+    else if (target.classList.contains('creator-step-extract')) step.extract = safeJsonParse(target.value, {});
+    else if (target.classList.contains('creator-step-assert')) step.assert = safeJsonParse(target.value, {});
+    else return;
+
+    var card = target.closest('.creator-step-card');
+    if (card) {
+      var titlePath = card.querySelector('.flow-step-path-inline');
+      var methodBadge = card.querySelector('.method-mini');
+      var stepName = card.querySelector('.creator-step-title .flow-step-name');
+      if (titlePath) titlePath.textContent = step.request.path;
+      if (methodBadge) {
+        methodBadge.textContent = step.request.method;
+        methodBadge.className = 'method-mini ' + (CLIENT_METHOD_CLASSES[step.request.method] || CLIENT_METHOD_CLASSES.OTHER);
+      }
+      if (stepName) stepName.textContent = step.name || step.id;
+    }
+    syncCreatorPreview();
   });
 
   content.addEventListener('click', function (e) {
