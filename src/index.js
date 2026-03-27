@@ -47,7 +47,7 @@ function inferSchema(value, depth) {
   // Hard depth cap — avoids stack overflows on circular-ish structures
   if (depth > 5) return { type: '...' };
 
-  if (value === null)      return { type: 'null' };
+  if (value === null) return { type: 'null' };
   if (value === undefined) return { type: 'undefined' };
 
   if (Array.isArray(value)) {
@@ -208,13 +208,13 @@ function shouldExclude(routePath, excludeList) {
  */
 const s = {
   /** @returns {SchemaNode} */
-  string:  () => ({ type: 'string' }),
+  string: () => ({ type: 'string' }),
   /** @returns {SchemaNode} */
-  number:  () => ({ type: 'number' }),
+  number: () => ({ type: 'number' }),
   /** @returns {SchemaNode} */
   boolean: () => ({ type: 'boolean' }),
   /** @returns {SchemaNode} */
-  null:    () => ({ type: 'null' }),
+  null: () => ({ type: 'null' }),
   /** @returns {SchemaNode} */
   unknown: () => ({ type: 'unknown' }),
   /**
@@ -297,7 +297,8 @@ function jsdocTypeToSchemaNode(type) {
 
   // Array shorthand: string[], User[], etc.
   if (t.endsWith('[]')) {
-    return { type: 'array', items: jsdocTypeToSchemaNode(t.slice(0, -2)) };
+    const itemType = t.slice(0, -2);
+    return { type: 'array', items: jsdocTypeToSchemaNode(itemType) };
   }
   // Generic Array<T>
   const genericArr = t.match(/^Array\s*<\s*(.+)\s*>$/i);
@@ -312,18 +313,18 @@ function jsdocTypeToSchemaNode(type) {
   }
 
   switch (t.toLowerCase()) {
-    case 'string':   return { type: 'string' };
-    case 'number':   return { type: 'number' };
-    case 'boolean':  return { type: 'boolean' };
-    case 'bool':     return { type: 'boolean' };
+    case 'string': return { type: 'string' };
+    case 'number': return { type: 'number' };
+    case 'boolean': return { type: 'boolean' };
+    case 'bool': return { type: 'boolean' };
     case 'int':
-    case 'integer':  return { type: 'number' };
+    case 'integer': return { type: 'number' };
     case 'float':
-    case 'double':   return { type: 'number' };
-    case 'null':     return { type: 'null' };
-    case 'object':   return { type: 'object', properties: {} };
-    case 'array':    return { type: 'array', items: { type: 'unknown' } };
-    default:         return { type: 'unknown' };
+    case 'double': return { type: 'number' };
+    case 'null': return { type: 'null' };
+    case 'object': return { type: 'object', properties: {} };
+    case 'array': return { type: 'array', items: { type: 'unknown' } };
+    default: return { type: 'unknown' };
   }
 }
 
@@ -367,7 +368,40 @@ function parseJSDoc(fn) {
   try { src = fn.toString(); } catch (_) { return null; }
 
   // Find the first /** ... */ block in the function source
-  const match = src.match(/\/\*\*([\s\S]*?)\*\//);
+  let match = src.match(/\/\*\*([\s\S]*?)\*\//);
+  
+  // Fallback for transpilers like tsx/esbuild that strip JSDoc from fn.toString()
+  if (!match) {
+    try {
+      const stack = new Error().stack || '';
+      const lines = stack.split('\n');
+      for (const stLine of lines) {
+        // Skip internal doctreen calls and node_modules
+        if (stLine.includes('node_modules') || stLine.includes('doctreen/src')) continue;
+        
+        const fileMatch = stLine.match(/\(([^:)]+):(\d+):\d+\)/) || stLine.match(/at ([^:)]+):(\d+):\d+/);
+        if (fileMatch) {
+          const filePath = fileMatch[1].replace(/^file:\/\//, '');
+          const fs = require('fs');
+          if (fs.existsSync(filePath)) {
+            const fileSrc = fs.readFileSync(filePath, 'utf-8');
+            const lineNum = parseInt(fileMatch[2], 10) - 1;
+            const fileLines = fileSrc.split('\n');
+            // Grab 15 lines before and 20 lines after the route definition
+            const startLine = Math.max(0, lineNum - 15);
+            const endLine = Math.min(fileLines.length, lineNum + 20);
+            const searchSlice = fileLines.slice(startLine, endLine).join('\n');
+            const fallbackMatch = searchSlice.match(/\/\*\*([\s\S]*?)\*\//);
+            if (fallbackMatch) {
+              match = fallbackMatch;
+              break;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   if (!match) return null;
 
   const rawLines = match[1].split('\n');
@@ -391,35 +425,35 @@ function parseJSDoc(fn) {
   let responseType = null;
 
   for (const line of lines) {
-    if (line.startsWith('@description ')) {
-      description = line.slice('@description '.length).trim();
+    if (/^@desc(ription)?\s/.test(line)) {
+      description = line.replace(/^@desc(ription)?\s+/, '').trim();
 
-    } else if (line.startsWith('@param ')) {
+    } else if (line.startsWith('@param')) {
       // @param {type} [prefix.name] - optional  (brackets → optional: true)
       // @param {type} prefix.name   - required
       const m = line.match(/^@param\s+\{([^}]+)\}\s+(\[?)([^\]\s]+)/);
       if (m) {
-        const type       = m[1];
+        const type = m[1];
         const isOptional = m[2] === '[';
-        const namePart   = m[3];
-        const dot        = namePart.indexOf('.');
+        const namePart = m[3];
+        const dot = namePart.indexOf('.');
         if (dot > -1) {
-          const prefix   = namePart.slice(0, dot);
+          const prefix = namePart.slice(0, dot);
           const propName = namePart.slice(dot + 1);
-          const base     = jsdocTypeToSchemaNode(type);
-          const node     = isOptional ? Object.assign({}, base, { optional: true }) : base;
-          if (prefix === 'body')       bodyProps[propName]  = node;
+          const base = jsdocTypeToSchemaNode(type);
+          const node = isOptional ? Object.assign({}, base, { optional: true }) : base;
+          if (prefix === 'body') bodyProps[propName] = node;
           else if (prefix === 'query') queryProps[propName] = node;
         }
       }
 
-    } else if (line.startsWith('@response ')) {
+    } else if (line.startsWith('@response')) {
       // @response {type} [propName] - optional  (brackets → optional: true)
       // @response {type} propName   - required
-      const m = line.match(/^@response\s+\{([^}]+)\}\s+(\[?)([^\]\s]+)/);
+      const m = line.match(/^@response\s+\{([^}]+)\}\s+(\[?)([^\]\s-]+)/);
       if (m) {
         const isOptional = m[2] === '[';
-        const base       = jsdocTypeToSchemaNode(m[1]);
+        const base = jsdocTypeToSchemaNode(m[1]);
         responseProps[m[3]] = isOptional ? Object.assign({}, base, { optional: true }) : base;
       }
 
@@ -428,7 +462,7 @@ function parseJSDoc(fn) {
       const m = line.match(/^@returns?\s+\{([^}]+)\}/);
       if (m) responseType = jsdocTypeToSchemaNode(m[1]);
 
-    } else if (line.startsWith('@header ')) {
+    } else if (line.startsWith('@header')) {
       // @header Authorization - Bearer <token>
       const m = line.match(/^@header\s+(\S+)(?:\s+-\s+(.+))?/);
       if (m) headers[m[1]] = m[2] || m[1];
@@ -439,10 +473,10 @@ function parseJSDoc(fn) {
     }
   }
 
-  const hasBody     = Object.keys(bodyProps).length > 0;
-  const hasQuery    = Object.keys(queryProps).length > 0;
+  const hasBody = Object.keys(bodyProps).length > 0;
+  const hasQuery = Object.keys(queryProps).length > 0;
   const hasRespProp = Object.keys(responseProps).length > 0;
-  const hasHeaders  = Object.keys(headers).length > 0;
+  const hasHeaders = Object.keys(headers).length > 0;
 
   // Nothing useful extracted
   if (!description && !hasHeaders && !hasBody && !hasQuery && !hasRespProp && !responseType) {
@@ -456,12 +490,12 @@ function parseJSDoc(fn) {
 
   return {
     description,
-    headers:  hasHeaders ? headers : null,
-    request:  (hasBody || hasQuery)
+    headers: hasHeaders ? headers : null,
+    request: (hasBody || hasQuery)
       ? {
-          body:  hasBody  ? { type: 'object', properties: bodyProps }  : null,
-          query: hasQuery ? { type: 'object', properties: queryProps } : null,
-        }
+        body: hasBody ? { type: 'object', properties: bodyProps } : null,
+        query: hasQuery ? { type: 'object', properties: queryProps } : null,
+      }
       : null,
     response: response || null,
   };

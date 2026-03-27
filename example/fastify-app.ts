@@ -28,7 +28,7 @@
  */
 
 import Fastify, { FastifyRequest, FastifyReply } from 'fastify';
-import { fastifyAdapter, defineRoute } from '../src/adapters/fastify';
+import { fastifyAdapter, defineRoute, defineSchema } from '../src/adapters/fastify';
 import { s } from '../src/index';
 import type { UserConfig } from '../src/index';
 
@@ -54,35 +54,35 @@ interface Product {
   createdAt: string;
 }
 
-interface UserListQuery  { page?: string; limit?: string; search?: string }
+interface UserListQuery { page?: string; limit?: string; search?: string }
 interface CreateUserBody { name: string; email: string; role?: string }
 interface UpdateUserBody { name: string; email: string }
 
-interface ProductListQuery  { category?: string; minPrice?: string; maxPrice?: string }
+interface ProductListQuery { category?: string; minPrice?: string; maxPrice?: string }
 interface CreateProductBody { name: string; price: number; category: string; inStock?: boolean }
 
-interface LoginBody     { email: string; password: string }
+interface LoginBody { email: string; password: string }
 interface LoginResponse { token: string; refreshToken: string; expiresIn: number; user: { id: number; email: string; role: string } }
 
 // ─── Reusable schema fragments ────────────────────────────────────────────────
 
-const userSchema = s.object({
-  id:        s.number(),
-  name:      s.string(),
-  email:     s.string(),
-  role:      s.string(),
-  active:    s.boolean(),
+const userSchema = defineSchema('User', s.object({
+  id: s.number(),
+  name: s.string(),
+  email: s.string(),
+  role: s.string(),
+  active: s.boolean(),
   createdAt: s.string(),
-});
+}));
 
-const productSchema = s.object({
-  id:        s.number(),
-  name:      s.string(),
-  price:     s.number(),
-  category:  s.string(),
-  inStock:   s.boolean(),
+const productSchema = defineSchema('Product', s.object({
+  id: s.number(),
+  name: s.string(),
+  price: s.number(),
+  category: s.string(),
+  inStock: s.boolean(),
   createdAt: s.string(),
-});
+}));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 1 — Call fastifyAdapter BEFORE registering routes
@@ -91,14 +91,14 @@ const productSchema = s.object({
 const docsConfig: UserConfig = {
   docsPath: '/api/docs',
   meta: {
-    title:       'My Fastify API (TypeScript)',
-    version:     '1.0.0',
+    title: 'My Fastify API (TypeScript)',
+    version: '1.0.0',
     description: 'Demo Fastify API powered by DocTreen. Schemas fully resolved at startup — no traffic needed.',
   },
   groups: {
-    users:    { description: 'Manage user accounts, profiles, and roles.' },
+    users: { description: 'Manage user accounts, profiles, and roles.' },
     products: { description: 'Browse and manage the product catalog.' },
-    auth:     { description: 'Authentication, session management, and token refresh.' },
+    auth: { description: 'Authentication, session management, and token refresh.' },
   },
   exclude: ['/health'],
   liveReload: true,
@@ -129,12 +129,12 @@ fastify.get('/users', function listUsers(
   const { page = '1', limit = '20', search = '' } = req.query;
   reply.send({
     users: [
-      { id: 1, name: 'Alice Smith', email: 'alice@example.com', role: 'admin', active: true,  createdAt: '2024-01-15T10:00:00Z' },
-      { id: 2, name: 'Bob Jones',   email: 'bob@example.com',   role: 'user',  active: false, createdAt: '2024-02-20T09:30:00Z' },
+      { id: 1, name: 'Alice Smith', email: 'alice@example.com', role: 'admin', active: true, createdAt: '2024-01-15T10:00:00Z' },
+      { id: 2, name: 'Bob Jones', email: 'bob@example.com', role: 'user', active: false, createdAt: '2024-02-20T09:30:00Z' },
     ],
-    total:  2,
-    page:   Number(page),
-    limit:  Number(limit),
+    total: 2,
+    page: Number(page),
+    limit: Number(limit),
     search: String(search),
   });
 });
@@ -144,18 +144,18 @@ fastify.get<{ Params: { id: string }; Reply: User }>('/users/:id', {
   handler: defineRoute(
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       reply.send({
-        id:        Number(req.params.id),
-        name:      'Alice Smith',
-        email:     'alice@example.com',
-        role:      'admin',
-        active:    true,
+        id: Number(req.params.id),
+        name: 'Alice Smith',
+        email: 'alice@example.com',
+        role: 'admin',
+        active: true,
         createdAt: '2024-01-15T10:00:00Z',
       });
     },
     {
       description: 'Fetch a single user by their numeric ID.',
-      response:    userSchema,
-      headers:     { Authorization: 'Bearer <token>' },
+      response: userSchema,
+      headers: { Authorization: 'Bearer <token>' },
       errors: {
         401: 'Missing or invalid Authorization header',
         404: 'User not found',
@@ -174,9 +174,9 @@ fastify.post<{ Body: CreateUserBody; Reply: User }>('/users', {
     },
     {
       description: 'Create a new user account. Role defaults to "user" if omitted.',
-      headers:     { Authorization: 'Bearer <token>', 'Content-Type': 'application/json' },
+      headers: { Authorization: 'Bearer <token>', 'Content-Type': 'application/json' },
       request: {
-        body:  s.object({ name: s.string(), email: s.string(), role: s.optional(s.string()) }),
+        body: s.object({ name: s.string(), email: s.string(), role: s.optional(s.string()) }),
         query: null,
       },
       response: userSchema,
@@ -196,7 +196,7 @@ fastify.put<{ Params: { id: string }; Body: UpdateUserBody }>('/users/:id', {
       type: 'object',
       required: ['name', 'email'],
       properties: {
-        name:  { type: 'string' },
+        name: { type: 'string' },
         email: { type: 'string' },
       },
     },
@@ -204,9 +204,9 @@ fastify.put<{ Params: { id: string }; Body: UpdateUserBody }>('/users/:id', {
       200: {
         type: 'object',
         properties: {
-          id:        { type: 'number' },
-          name:      { type: 'string' },
-          email:     { type: 'string' },
+          id: { type: 'number' },
+          name: { type: 'string' },
+          email: { type: 'string' },
           updatedAt: { type: 'string' },
         },
       },
@@ -225,8 +225,8 @@ fastify.delete<{ Params: { id: string }; Reply: { deleted: boolean; id: number }
     },
     {
       description: 'Permanently delete a user by ID.',
-      response:    s.object({ deleted: s.boolean(), id: s.number() }),
-      headers:     { Authorization: 'Bearer <token>' },
+      response: s.object({ deleted: s.boolean(), id: s.number() }),
+      headers: { Authorization: 'Bearer <token>' },
       errors: {
         401: 'Unauthorized',
         403: 'Forbidden — cannot delete another admin account',
@@ -246,24 +246,24 @@ fastify.get<{ Querystring: ProductListQuery }>('/products', {
       const { category = '', minPrice = '0', maxPrice = '9999' } = req.query;
       reply.send({
         products: [
-          { id: 1, name: 'Keyboard',   price: 79.99, category: 'electronics', inStock: true,  createdAt: '2024-03-01T08:00:00Z' },
-          { id: 2, name: 'Desk Lamp',  price: 34.50, category: 'furniture',   inStock: true,  createdAt: '2024-03-05T10:00:00Z' },
-          { id: 3, name: 'Coffee Mug', price:  9.99, category: 'kitchen',     inStock: false, createdAt: '2024-03-10T12:00:00Z' },
+          { id: 1, name: 'Keyboard', price: 79.99, category: 'electronics', inStock: true, createdAt: '2024-03-01T08:00:00Z' },
+          { id: 2, name: 'Desk Lamp', price: 34.50, category: 'furniture', inStock: true, createdAt: '2024-03-05T10:00:00Z' },
+          { id: 3, name: 'Coffee Mug', price: 9.99, category: 'kitchen', inStock: false, createdAt: '2024-03-10T12:00:00Z' },
         ],
-        total:   3,
+        total: 3,
         filters: { category: String(category), minPrice: Number(minPrice), maxPrice: Number(maxPrice) },
       });
     },
     {
       description: 'List products with optional filtering by category and price range.',
       request: {
-        body:  null,
+        body: null,
         query: s.object({ category: s.optional(s.string()), minPrice: s.optional(s.number()), maxPrice: s.optional(s.number()) }),
       },
       response: s.object({
         products: s.array(productSchema),
-        total:    s.number(),
-        filters:  s.object({ category: s.string(), minPrice: s.number(), maxPrice: s.number() }),
+        total: s.number(),
+        filters: s.object({ category: s.string(), minPrice: s.number(), maxPrice: s.number() }),
       }),
     }
   ),
@@ -277,11 +277,11 @@ fastify.get('/products/:productId', {
       200: {
         type: 'object',
         properties: {
-          id:        { type: 'number' },
-          name:      { type: 'string' },
-          price:     { type: 'number' },
-          category:  { type: 'string' },
-          inStock:   { type: 'boolean' },
+          id: { type: 'number' },
+          name: { type: 'string' },
+          price: { type: 'number' },
+          category: { type: 'string' },
+          inStock: { type: 'boolean' },
           createdAt: { type: 'string' },
         },
       },
@@ -289,11 +289,11 @@ fastify.get('/products/:productId', {
   },
   handler: async (req: FastifyRequest<{ Params: { productId: string } }>, reply: FastifyReply) => {
     reply.send({
-      id:        Number(req.params.productId),
-      name:      'Wireless Mouse',
-      price:     29.99,
-      category:  'electronics',
-      inStock:   true,
+      id: Number(req.params.productId),
+      name: 'Wireless Mouse',
+      price: 29.99,
+      category: 'electronics',
+      inStock: true,
       createdAt: '2024-03-10T08:30:00Z',
     });
   },
@@ -310,9 +310,9 @@ fastify.post<{ Body: CreateProductBody; Reply: Product }>('/products', {
     },
     {
       description: 'Create a new product listing. inStock defaults to true.',
-      headers:     { Authorization: 'Bearer <token>', 'Content-Type': 'application/json' },
+      headers: { Authorization: 'Bearer <token>', 'Content-Type': 'application/json' },
       request: {
-        body:  s.object({ name: s.string(), price: s.number(), category: s.string(), inStock: s.optional(s.boolean()) }),
+        body: s.object({ name: s.string(), price: s.number(), category: s.string(), inStock: s.optional(s.boolean()) }),
         query: null,
       },
       response: productSchema,
@@ -329,27 +329,27 @@ fastify.post<{ Body: LoginBody; Reply: LoginResponse }>('/auth/login', {
     async (req: FastifyRequest<{ Body: LoginBody }>, reply: FastifyReply) => {
       const { email } = req.body;
       reply.send({
-        token:        'eyJhbGciOiJIUzI1NiJ9.example',
+        token: 'eyJhbGciOiJIUzI1NiJ9.example',
         refreshToken: 'rt_abc123xyz',
-        expiresIn:    3600,
-        user:         { id: 1, email, role: 'admin' },
+        expiresIn: 3600,
+        user: { id: 1, email, role: 'admin' },
       });
     },
     {
       description: 'Authenticate with email and password. Returns a JWT access token and a refresh token.',
-      headers:     { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       request: {
-        body:  s.object({ email: s.string(), password: s.string() }),
+        body: s.object({ email: s.string(), password: s.string() }),
         query: null,
       },
       response: s.object({
-        token:        s.string(),
+        token: s.string(),
         refreshToken: s.string(),
-        expiresIn:    s.number(),
-        user:         s.object({ id: s.number(), email: s.string(), role: s.string() }),
+        expiresIn: s.number(),
+        user: s.object({ id: s.number(), email: s.string(), role: s.string() }),
       }),
       errors: {
-        401: { description: 'Invalid email or password',                   schema: s.object({ message: s.string() }) },
+        401: { description: 'Invalid email or password', schema: s.object({ message: s.string() }) },
         422: { description: 'Validation failed — missing required fields', schema: s.object({ message: s.string(), field: s.string() }) },
       },
     }
@@ -363,9 +363,9 @@ fastify.post<{ Body: { refreshToken: string }; Reply: { success: boolean; messag
     },
     {
       description: 'Invalidate the provided refresh token, ending the session.',
-      headers:     { Authorization: 'Bearer <token>', 'Content-Type': 'application/json' },
-      request:     { body: s.object({ refreshToken: s.string() }), query: null },
-      response:    s.object({ success: s.boolean(), message: s.string() }),
+      headers: { Authorization: 'Bearer <token>', 'Content-Type': 'application/json' },
+      request: { body: s.object({ refreshToken: s.string() }), query: null },
+      response: s.object({ success: s.boolean(), message: s.string() }),
     }
   ),
 });
@@ -377,9 +377,9 @@ fastify.post<{ Body: { refreshToken: string }; Reply: { token: string; expiresIn
     },
     {
       description: 'Exchange a valid refresh token for a new access token.',
-      headers:     { 'Content-Type': 'application/json' },
-      request:     { body: s.object({ refreshToken: s.string() }), query: null },
-      response:    s.object({ token: s.string(), expiresIn: s.number() }),
+      headers: { 'Content-Type': 'application/json' },
+      request: { body: s.object({ refreshToken: s.string() }), query: null },
+      response: s.object({ token: s.string(), expiresIn: s.number() }),
     }
   ),
 });
@@ -396,7 +396,7 @@ fastify.get('/health', (_req: FastifyRequest, reply: FastifyReply) => {
 // Start
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PORT = Number(process.env.PORT) || 3001;
+const PORT = Number(process.env.PORT) || 3010;
 
 fastify.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
   if (err) {
