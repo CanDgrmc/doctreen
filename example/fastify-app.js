@@ -35,6 +35,7 @@
  */
 
 const fastify = require('fastify')({ logger: false });
+const path = require('path');
 const { fastifyAdapter, defineRoute, defineSchema, s } = require('../src/adapters/fastify');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,6 +44,7 @@ const { fastifyAdapter, defineRoute, defineSchema, s } = require('../src/adapter
 
 fastifyAdapter(fastify, {
   docsPath: '/api/docs',
+  flowsPath: path.join(__dirname, 'doctreen-flows-fastify'),
   meta: {
     title:       'My Fastify API',
     version:     '1.0.0',
@@ -392,5 +394,6 @@ fastify.listen({ port: PORT, host: '0.0.0.0' }, function (err) {
   console.log('');
   console.log('  Server running  →  http://localhost:' + PORT);
   console.log('  API Docs        →  http://localhost:' + PORT + '/api/docs');
+  console.log('  Flows           →  open the Flows section in /api/docs');
   console.log('');
 });

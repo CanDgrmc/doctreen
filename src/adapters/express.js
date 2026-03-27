@@ -28,6 +28,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { RouteRegistry, normalizeConfig, shouldExclude, inferSchema, parseJSDoc, defineSchema, s } = require('../index');
+const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
@@ -361,6 +362,26 @@ function introspectExpressApp(app, registry, config) {
   walkStack(router.stack, '', registry, config);
 }
 
+function readJsonBody(req) {
+  if (req.body && typeof req.body === 'object') {
+    return Promise.resolve(req.body);
+  }
+
+  return new Promise(function (resolve, reject) {
+    let raw = '';
+    req.on('data', function (chunk) { raw += chunk; });
+    req.on('end', function () {
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch (error) {
+        reject(new Error('Invalid JSON request body.'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -392,6 +413,24 @@ function expressAdapter(app, userConfig = {}) {
   setImmediate(() => introspectExpressApp(app, registry, config));
 
   return function docMiddleware(req, res, next) {
+    if (req.path === config.docsPath + '/__flows/run' || req.url === config.docsPath + '/__flows/run') {
+      if (req.method !== 'POST') return next();
+
+      readJsonBody(req)
+        .then(runFlowPayload)
+        .then(function (result) {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.statusCode = result.ok ? 200 : 422;
+          res.end(JSON.stringify(result));
+        })
+        .catch(function (error) {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        });
+      return;
+    }
+
     if (req.path !== config.docsPath && req.url !== config.docsPath) {
       return next();
     }
@@ -400,7 +439,7 @@ function expressAdapter(app, userConfig = {}) {
       introspectExpressApp(app, registry, config);
     }
 
-    const html = serveDocsUI(registry.getAll(), config);
+    const html = serveDocsUI(registry.getAll(), config, { flows: getUiFlows(config) });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.statusCode = 200;
     res.end(html);

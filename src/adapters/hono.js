@@ -11,6 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema, s } = require('../index');
+const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 
 // Only document these HTTP methods — skip ALL, OPTIONS, HEAD (internal/auto-added)
@@ -176,13 +177,23 @@ function honoAdapter(app, userConfig) {
     if (!cachedRegistry || config.liveReload) {
       // Filter out the docs route itself so it doesn't appear in the route list
       const appRoutes = (app.routes || []).filter(
-        (r) => r.path !== config.docsPath
+        (r) => r.path !== config.docsPath && r.path !== config.docsPath + '/__flows/run'
       );
       cachedRegistry = buildRegistrySnapshot(appRoutes, config);
     }
 
-    const html = serveDocsUI(cachedRegistry.getAll(), config);
+    const html = serveDocsUI(cachedRegistry.getAll(), config, { flows: getUiFlows(config) });
     return c.html(html);
+  });
+
+  app.post(config.docsPath + '/__flows/run', async function runDocsFlow(c) {
+    try {
+      const payload = await c.req.json();
+      const result = await runFlowPayload(payload || {});
+      return c.json(result, result.ok ? 200 : 422);
+    } catch (error) {
+      return c.json({ ok: false, error: error.message || String(error) }, 400);
+    }
   });
 }
 

@@ -11,6 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema, s } = require('../index');
+const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 
 // Only document these HTTP methods — skip HEAD, OPTIONS (auto-added by @koa/router for GET routes)
@@ -134,6 +135,26 @@ function buildRegistrySnapshot(layers, config) {
   return registry;
 }
 
+function readJsonBody(ctx) {
+  if (ctx.request && ctx.request.body && typeof ctx.request.body === 'object') {
+    return Promise.resolve(ctx.request.body);
+  }
+
+  return new Promise(function (resolve, reject) {
+    let raw = '';
+    ctx.req.on('data', function (chunk) { raw += chunk; });
+    ctx.req.on('end', function () {
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch (_error) {
+        reject(new Error('Invalid JSON request body.'));
+      }
+    });
+    ctx.req.on('error', reject);
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -182,13 +203,25 @@ function koaAdapter(router, userConfig) {
     if (!cachedRegistry || config.liveReload) {
       // Filter out the docs route itself so it doesn't appear in the route list
       const layers = (router.stack || []).filter(
-        (layer) => layer.path !== config.docsPath
+        (layer) => layer.path !== config.docsPath && layer.path !== config.docsPath + '/__flows/run'
       );
       cachedRegistry = buildRegistrySnapshot(layers, config);
     }
 
     ctx.type = 'text/html';
-    ctx.body = serveDocsUI(cachedRegistry.getAll(), config);
+    ctx.body = serveDocsUI(cachedRegistry.getAll(), config, { flows: getUiFlows(config) });
+  });
+
+  router.post(config.docsPath + '/__flows/run', async function runDocsFlow(ctx) {
+    try {
+      const payload = await readJsonBody(ctx);
+      const result = await runFlowPayload(payload || {});
+      ctx.status = result.ok ? 200 : 422;
+      ctx.body = result;
+    } catch (error) {
+      ctx.status = 400;
+      ctx.body = { ok: false, error: error.message || String(error) };
+    }
   });
 }
 

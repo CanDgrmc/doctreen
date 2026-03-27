@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "name": "User onboarding",
+  "description": "Create a user, fetch it back, then delete it.",
+  "baseUrl": "http://localhost:3001",
+  "inputs": {
+    "email": { "type": "string", "required": true },
+    "name": { "type": "string", "required": true }
+  },
+  "steps": [
+    {
+      "id": "create-user",
+      "name": "Create user",
+      "request": {
+        "method": "POST",
+        "path": "/users",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer demo-token"
+        },
+        "body": {
+          "email": "{{input.email}}",
+          "name": "{{input.name}}",
+          "role": "user"
+        }
+      },
+      "extract": {
+        "userId": { "from": "body", "path": "$.id" }
+      },
+      "assert": {
+        "status": 201,
+        "body": {
+          "$.email": "{{input.email}}",
+          "$.name": "{{input.name}}"
+        }
+      }
+    },
+    {
+      "id": "get-user",
+      "name": "Fetch user",
+      "request": {
+        "method": "GET",
+        "path": "/users/{{vars.userId}}",
+        "headers": {
+          "Authorization": "Bearer demo-token"
+        }
+      },
+      "assert": {
+        "status": 200,
+        "body": {
+          "$.id": "{{vars.userId}}"
+        },
+        "exists": ["$.email", "$.createdAt"]
+      }
+    },
+    {
+      "id": "delete-user",
+      "name": "Delete user",
+      "request": {
+        "method": "DELETE",
+        "path": "/users/{{vars.userId}}",
+        "headers": {
+          "Authorization": "Bearer demo-token"
+        }
+      },
+      "assert": {
+        "status": 200,
+        "body": {
+          "$.deleted": true
+        }
+      }
+    }
+  ]
+}

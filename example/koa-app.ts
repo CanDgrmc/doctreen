@@ -13,11 +13,14 @@
  */
 
 import Koa from 'koa';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Router from '@koa/router';
 import { bodyParser } from '@koa/bodyparser';
 import { koaAdapter, defineRoute, defineSchema, s } from '../src/adapters/koa';
 import type { UserConfig } from '../src/index';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app    = new Koa();
 const router = new Router();
 
@@ -81,6 +84,7 @@ defineSchema('Product', productSchema);
 
 const docsConfig: UserConfig = {
   docsPath: '/api/docs',
+  flowsPath: path.join(__dirname, 'doctreen-flows-koa'),
   meta: {
     title:       'My Koa API (TypeScript)',
     version:     '1.0.0',
@@ -357,6 +361,7 @@ app.listen(PORT, () => {
   console.log('');
   console.log('  Server running  →  http://localhost:' + PORT);
   console.log('  API Docs        →  http://localhost:' + PORT + '/api/docs');
+  console.log('  Flows           →  open the Flows section in /api/docs');
   console.log('');
   console.log('  All schemas fully resolved at startup — no curl needed to populate docs.');
   console.log('');

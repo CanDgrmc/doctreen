@@ -6,6 +6,7 @@
  * @typedef {import('../index').RouteEntry}       RouteEntry
  * @typedef {import('../index').SchemaNode}       SchemaNode
  * @typedef {import('../index').NormalizedConfig} NormalizedConfig
+ * @typedef {import('../flows').FlowDefinition}   FlowDefinition
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -416,6 +417,246 @@ function renderGroupSections(groups, groupsMeta) {
   return html;
 }
 
+/**
+ * @param {FlowDefinition[]} flows
+ * @returns {string}
+ */
+function renderFlowSidebar(flows) {
+  if (!flows || flows.length === 0) return '';
+
+  let html = '';
+  for (let i = 0; i < flows.length; i++) {
+    const flow = flows[i];
+    const stepCount = Array.isArray(flow.steps) ? flow.steps.length : 0;
+    html +=
+      `<button class="sidebar-flow-item" data-flow-index="${i}">` +
+      `<span class="sidebar-flow-name">${escapeHtml(flow.name)}</span>` +
+      `<span class="sidebar-item-badge">${stepCount}</span>` +
+      `</button>`;
+  }
+  return html;
+}
+
+/**
+ * @param {FlowDefinition[]} flows
+ * @returns {string}
+ */
+function renderFlowSections(flows) {
+  if (!flows || flows.length === 0) return '';
+
+  let html = `
+  <section class="flow-group" id="flow-group" data-group="flows">
+    <div class="group-header-bar">
+      <div class="group-header-left">
+        <h2 class="group-title">Flows</h2>
+        <p class="group-desc">Run named request flows through the shared server-side flow engine.</p>
+      </div>
+      <span class="group-count-badge">${flows.length} flow${flows.length !== 1 ? 's' : ''}</span>
+    </div>
+    <div class="flow-info-card">
+      <div class="flow-info-header">
+        <h3 class="flow-info-title">How To Create Flows</h3>
+        <span class="flow-info-badge">Guide</span>
+      </div>
+      <div class="flow-info-grid">
+        <div class="flow-info-block">
+          <div class="flow-info-block-title">1. Start With A Scenario</div>
+          <p class="flow-info-text">Create one flow for one named piece of logic, such as <code>User onboarding</code>, <code>Login smoke</code>, or <code>Checkout happy path</code>. Keep the sequence focused and ordered.</p>
+        </div>
+        <div class="flow-info-block">
+          <div class="flow-info-block-title">2. Define Inputs</div>
+          <p class="flow-info-text">Use <code>inputs</code> for values the runner should ask for at runtime, such as <code>email</code>, <code>name</code>, or <code>tenantId</code>. Mark required inputs with <code>"required": true</code>.</p>
+        </div>
+        <div class="flow-info-block">
+          <div class="flow-info-block-title">3. Chain Requests With Vars</div>
+          <p class="flow-info-text">Use <code>extract</code> to capture values from a response, then reuse them in later steps with <code>{{vars.someName}}</code>. Common examples are IDs, tokens, and timestamps.</p>
+        </div>
+        <div class="flow-info-block">
+          <div class="flow-info-block-title">4. Add Assertions</div>
+          <p class="flow-info-text">Each step should validate the expected behavior. Start with <code>status</code>, then add body checks like <code>"$.id"</code> or <code>"$.email"</code>. This keeps the same flow useful as an integration test.</p>
+        </div>
+      </div>
+      <div class="flow-info-subgrid">
+        <div class="flow-info-block">
+          <div class="flow-info-block-title">Variable Namespaces</div>
+          <ul class="flow-info-list">
+            <li><code>{{input.email}}</code>: runtime values entered in the UI or CLI</li>
+            <li><code>{{vars.userId}}</code>: values extracted from previous steps</li>
+            <li><code>{{env.baseUrl}}</code>: environment values loaded from the flow or env file</li>
+          </ul>
+          <pre class="flow-info-pre">{
+  "baseUrl": "{{env.baseUrl}}",
+  "request": {
+    "path": "/users/{{vars.userId}}",
+    "body": {
+      "email": "{{input.email}}"
+    }
+  }
+}</pre>
+        </div>
+        <div class="flow-info-block">
+          <div class="flow-info-block-title">Minimal Step Shape</div>
+          <pre class="flow-info-pre">{
+  "id": "create-user",
+  "request": {
+    "method": "POST",
+    "path": "/users",
+    "body": { "email": "{{input.email}}" }
+  },
+  "extract": {
+    "userId": { "from": "body", "path": "$.id" }
+  },
+  "assert": {
+    "status": 201
+  }
+}</pre>
+        </div>
+      </div>
+      <div class="flow-info-subgrid">
+        <div class="flow-info-block">
+          <div class="flow-info-block-title">Extract + Assert Example</div>
+          <pre class="flow-info-pre">{
+  "extract": {
+    "userId": { "from": "body", "path": "$.id" },
+    "etag":   { "from": "header", "path": "etag" }
+  },
+  "assert": {
+    "status": 201,
+    "body": {
+      "$.email": "{{input.email}}"
+    },
+    "exists": ["$.id", "$.createdAt"]
+  }
+}</pre>
+        </div>
+        <div class="flow-info-block">
+          <div class="flow-info-block-title">Complete Flow Example</div>
+          <pre class="flow-info-pre">{
+  "version": 1,
+  "name": "User onboarding",
+  "baseUrl": "http://localhost:3000",
+  "inputs": {
+    "email": { "type": "string", "required": true },
+    "name":  { "type": "string", "required": true }
+  },
+  "steps": [
+    {
+      "id": "create-user",
+      "request": {
+        "method": "POST",
+        "path": "/users",
+        "body": {
+          "email": "{{input.email}}",
+          "name": "{{input.name}}"
+        }
+      },
+      "extract": {
+        "userId": { "from": "body", "path": "$.id" }
+      },
+      "assert": { "status": 201 }
+    },
+    {
+      "id": "get-user",
+      "request": {
+        "method": "GET",
+        "path": "/users/{{vars.userId}}"
+      },
+      "assert": {
+        "status": 200,
+        "body": { "$.id": "{{vars.userId}}" }
+      }
+    }
+  ]
+}</pre>
+        </div>
+      </div>
+      <p class="flow-info-footnote">Store flow files in <code>doctreen-flows/*.json</code> or configure <code>flowsPath</code>. The same definition can be run here in the docs UI or headlessly with <code>doctreen-flow run ...</code>.</p>
+    </div>
+    <div class="flow-list">`;
+
+  for (let i = 0; i < flows.length; i++) {
+    const flow = flows[i];
+    const inputs = flow.inputs || {};
+    const inputEntries = Object.entries(inputs);
+    const steps = Array.isArray(flow.steps) ? flow.steps : [];
+
+    let inputHtml = '';
+    if (inputEntries.length === 0) {
+      inputHtml = `<div class="flow-empty-note">No runtime inputs required.</div>`;
+    } else {
+      inputHtml = inputEntries.map(function ([name, definition]) {
+        const required = definition && definition.required;
+        return (
+          `<label class="flow-input-row">` +
+          `<span class="flow-input-label">${escapeHtml(name)}${required ? ' *' : ''}</span>` +
+          `<input class="flow-input" data-input-name="${escapeHtml(name)}" placeholder="${escapeHtml((definition && definition.type) || 'string')}" />` +
+          `</label>`
+        );
+      }).join('');
+    }
+
+    const stepsHtml = steps.map(function (step, stepIndex) {
+      const method = step.request && step.request.method ? String(step.request.method).toUpperCase() : 'GET';
+      const path = step.request && step.request.path ? step.request.path : '/';
+      const style = METHOD_STYLES[method] || { cls: 'method-other' };
+      return (
+        `<div class="flow-step-row">` +
+        `<span class="flow-step-index">${stepIndex + 1}</span>` +
+        `<span class="method-mini ${style.cls}">${escapeHtml(method)}</span>` +
+        `<span class="flow-step-path">${escapeHtml(path)}</span>` +
+        `</div>`
+      );
+    }).join('');
+
+    html += `
+      <article class="flow-card" id="flow-${i}" data-flow-index="${i}">
+        <div class="flow-card-header">
+          <div>
+            <h3 class="flow-title">${escapeHtml(flow.name)}</h3>
+            ${flow.description ? `<p class="flow-desc">${escapeHtml(flow.description)}</p>` : ''}
+          </div>
+          <div class="flow-meta">
+            <span class="badge badge-count">${steps.length} step${steps.length !== 1 ? 's' : ''}</span>
+          </div>
+        </div>
+        <div class="flow-controls">
+          <label class="flow-input-row flow-base-url-row">
+            <span class="flow-input-label">baseUrl</span>
+            <input class="flow-base-url" value="${escapeHtml(flow.baseUrl || '')}" placeholder="http://localhost:3000" />
+          </label>
+          <div class="flow-input-grid">
+            ${inputHtml}
+          </div>
+          <div class="flow-toolbar">
+            <button class="run-flow-btn" data-flow-index="${i}">Run flow</button>
+            <button class="export-flow-btn" data-flow-index="${i}">Export JSON</button>
+          </div>
+        </div>
+        <div class="flow-steps">
+          <div class="detail-col-title">Steps</div>
+          ${stepsHtml || `<div class="flow-empty-note">No steps defined.</div>`}
+        </div>
+        <div class="flow-result-block">
+          <div class="detail-col-title">Last result</div>
+          <div class="flow-result-tabs">
+            <button class="flow-result-tab is-active" data-tab="timeline">Timeline</button>
+            <button class="flow-result-tab" data-tab="json">JSON</button>
+          </div>
+          <div class="flow-result-panels">
+            <div class="flow-result-timeline is-active">Not run yet.</div>
+            <pre class="flow-result">Not run yet.</pre>
+          </div>
+        </div>
+      </article>`;
+  }
+
+  html += `
+    </div>
+  </section>`;
+
+  return html;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -426,19 +667,24 @@ function renderGroupSections(groups, groupsMeta) {
  *
  * @param {RouteEntry[]} routes
  * @param {NormalizedConfig} config
+ * @param {{ flows?: FlowDefinition[] }} [options]
  * @returns {string} Full HTML document
  */
-function serveDocsUI(routes, config) {
+function serveDocsUI(routes, config, options) {
+  options = options || {};
   const { meta }    = config;
   const generatedAt = new Date().toUTCString();
   const totalRoutes = routes.length;
   const liveCount   = routes.filter((r) => r.requestSchema !== null || r.responseSchema !== null).length;
+  const flows       = Array.isArray(options.flows) ? options.flows : [];
 
   const groups         = groupRoutes(routes);
   const sidebarHtml    = renderSidebar(groups);
+  const flowSidebarHtml = renderFlowSidebar(flows);
   const sectionsHtml   = groups.size > 0
     ? renderGroupSections(groups, config.groups || {})
     : `<p class="empty-state">No routes discovered. Make sure your routes are defined before the docs endpoint is first requested.</p>`;
+  const flowSectionsHtml = renderFlowSections(flows);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -488,6 +734,33 @@ function serveDocsUI(routes, config) {
       justify-content: space-between;
       flex-wrap: wrap;
       gap: 10px;
+    }
+    .header-tabs {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .header-tab {
+      padding: 7px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .header-tab:hover { color: var(--text); border-color: rgba(255,255,255,0.14); }
+    .header-tab.is-active-routes {
+      background: rgba(66,153,225,0.14);
+      border-color: rgba(66,153,225,0.3);
+      color: #63b3ed;
+    }
+    .header-tab.is-active-flows {
+      background: rgba(72,187,120,0.14);
+      border-color: rgba(72,187,120,0.3);
+      color: #68d391;
     }
     .header-left { display: flex; flex-direction: column; gap: 4px; }
     .header-title { font-size: 1.45rem; font-weight: 700; color: #fff; }
@@ -555,6 +828,9 @@ function serveDocsUI(routes, config) {
     }
 
     .sidebar-nav { padding: 4px 8px 16px; }
+    .sidebar-subnav { padding: 4px 8px 16px; border-top: 1px solid var(--border); }
+    .sidebar-pane { display: none; }
+    .sidebar-pane.is-active { display: block; }
 
     /* ── Sidebar group (collapsible) ─────────────────────────────────────────── */
     .sidebar-group { margin-bottom: 2px; }
@@ -624,6 +900,31 @@ function serveDocsUI(routes, config) {
       font-family: 'SFMono-Regular', Consolas, monospace;
       font-size: 0.71rem;
     }
+    .sidebar-flow-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 7px 10px;
+      border-radius: 6px;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.12s, color 0.12s;
+      margin-bottom: 3px;
+    }
+    .sidebar-flow-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .sidebar-flow-item.is-active { background: rgba(72,187,120,0.1); color: #68d391; }
+    .sidebar-flow-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.78rem;
+    }
 
     /* ── Method mini-badge (sidebar) ─────────────────────────────────────────── */
     .method-mini {
@@ -678,12 +979,375 @@ function serveDocsUI(routes, config) {
       overflow-y: auto;
       padding: 28px 36px 64px;
     }
+    .content-pane { display: none; }
+    .content-pane.is-active { display: block; }
 
     /* ── Route group section ─────────────────────────────────────────────────── */
     .route-group {
       margin-bottom: 40px;
     }
     .route-group:last-child { margin-bottom: 0; }
+    .flow-group { margin-top: 40px; }
+    .flow-info-card {
+      background: linear-gradient(180deg, rgba(66,153,225,0.08), rgba(26,31,46,0.98));
+      border: 1px solid rgba(66,153,225,0.22);
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 18px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    }
+    .flow-info-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .flow-info-title {
+      font-size: 1rem;
+      color: #dbeafe;
+      margin: 0;
+    }
+    .flow-info-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(72,187,120,0.14);
+      color: #9ae6b4;
+      border: 1px solid rgba(72,187,120,0.22);
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .flow-info-grid, .flow-info-subgrid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .flow-info-subgrid { margin-top: 12px; }
+    .flow-info-block {
+      background: rgba(0,0,0,0.14);
+      border: 1px solid var(--border-sub);
+      border-radius: 10px;
+      padding: 12px;
+      min-width: 0;
+    }
+    .flow-info-block-title {
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #93c5fd;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .flow-info-text {
+      font-size: 0.79rem;
+      line-height: 1.6;
+      color: #cbd5e0;
+    }
+    .flow-info-list {
+      padding-left: 18px;
+      color: #cbd5e0;
+      font-size: 0.78rem;
+      line-height: 1.7;
+    }
+    .flow-info-pre {
+      margin: 0;
+      font-size: 0.73rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      color: #cbd5e0;
+    }
+    .flow-info-footnote {
+      margin-top: 12px;
+      font-size: 0.77rem;
+      color: #a0aec0;
+      line-height: 1.6;
+    }
+    .flow-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+    }
+    .flow-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.26);
+    }
+    .flow-card-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .flow-title {
+      font-size: 1rem;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .flow-desc {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .flow-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .flow-input-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .flow-input-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .flow-input-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+    .flow-input, .flow-base-url {
+      width: 100%;
+      padding: 8px 10px;
+      background: rgba(0,0,0,0.18);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.8rem;
+      outline: none;
+    }
+    .flow-toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .run-flow-btn, .export-flow-btn {
+      padding: 7px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-detail);
+      color: var(--text);
+      font-size: 0.76rem;
+      cursor: pointer;
+    }
+    .run-flow-btn:hover { border-color: rgba(72,187,120,0.5); color: #68d391; }
+    .export-flow-btn:hover { border-color: rgba(99,179,237,0.5); color: #63b3ed; }
+    .flow-step-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border-sub);
+    }
+    .flow-step-row:last-child { border-bottom: none; }
+    .flow-step-index {
+      width: 20px;
+      color: var(--text-dim);
+      font-size: 0.72rem;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .flow-step-path {
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 0.76rem;
+      color: var(--text);
+      word-break: break-all;
+    }
+    .flow-empty-note {
+      font-size: 0.76rem;
+      color: var(--text-dim);
+      padding: 4px 0;
+    }
+    .flow-result-block { margin-top: 14px; }
+    .flow-result-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .flow-result-tab {
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg-detail);
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      cursor: pointer;
+    }
+    .flow-result-tab.is-active {
+      background: rgba(99,179,237,0.12);
+      border-color: rgba(99,179,237,0.3);
+      color: #63b3ed;
+    }
+    .flow-result-panels > * { display: none; }
+    .flow-result-panels > .is-active { display: block; }
+    .flow-result-timeline {
+      background: rgba(0,0,0,0.18);
+      border: 1px solid var(--border-sub);
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 120px;
+    }
+    .flow-result {
+      background: rgba(0,0,0,0.18);
+      border: 1px solid var(--border-sub);
+      border-radius: 8px;
+      padding: 12px;
+      color: #a0aec0;
+      font-size: 0.74rem;
+      overflow: auto;
+      min-height: 120px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .flow-summary-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--border-sub);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.02);
+      margin-bottom: 12px;
+    }
+    .flow-summary-main {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .flow-status-pill {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .flow-status-pill.pass { background: rgba(72,187,120,0.12); color: #68d391; }
+    .flow-status-pill.fail { background: rgba(245,101,101,0.12); color: #fc8181; }
+    .flow-summary-meta {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+    }
+    .flow-vars-chip {
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(99,179,237,0.12);
+      color: #90cdf4;
+      font-size: 0.7rem;
+      border: 1px solid rgba(99,179,237,0.2);
+    }
+    .flow-step-card {
+      position: relative;
+      padding: 12px 12px 12px 18px;
+      border: 1px solid var(--border-sub);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.02);
+      margin-bottom: 10px;
+    }
+    .flow-step-card:last-child { margin-bottom: 0; }
+    .flow-step-card::before {
+      content: '';
+      position: absolute;
+      left: 8px;
+      top: 12px;
+      bottom: 12px;
+      width: 2px;
+      border-radius: 2px;
+      background: var(--border);
+    }
+    .flow-step-card.pass::before { background: #48bb78; }
+    .flow-step-card.fail::before { background: #f56565; }
+    .flow-step-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .flow-step-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .flow-step-name {
+      color: var(--text);
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+    .flow-step-badges {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .flow-mini-badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 0.67rem;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      background: rgba(255,255,255,0.03);
+    }
+    .flow-step-path-inline {
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 0.74rem;
+      color: #cbd5e0;
+      word-break: break-all;
+    }
+    .flow-step-sections {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .flow-step-section {
+      background: rgba(0,0,0,0.14);
+      border: 1px solid var(--border-sub);
+      border-radius: 8px;
+      padding: 10px;
+      min-width: 0;
+    }
+    .flow-step-section-title {
+      font-size: 0.64rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-dim);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .flow-step-pre {
+      margin: 0;
+      font-size: 0.72rem;
+      color: #cbd5e0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'SFMono-Regular', Consolas, monospace;
+    }
+    .flow-step-error {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(245,101,101,0.08);
+      border: 1px solid rgba(245,101,101,0.2);
+      color: #feb2b2;
+      font-size: 0.74rem;
+    }
+    .flow-result.is-pass { color: #9ae6b4; }
+    .flow-result.is-fail { color: #feb2b2; }
 
     .group-header-bar {
       display: flex;
@@ -1049,6 +1713,11 @@ function serveDocsUI(routes, config) {
       border-top: 1px solid var(--border);
       flex-shrink: 0;
     }
+    @media (max-width: 900px) {
+      .flow-info-grid, .flow-info-subgrid, .flow-step-sections {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -1066,6 +1735,7 @@ function serveDocsUI(routes, config) {
       <button id="export-postman-btn" class="export-postman-btn">Export to Postman</button>
     </div>
   </div>
+  ${flows.length > 0 ? `<div class="header-tabs" id="header-tabs"><button class="header-tab is-active-routes" data-pane="routes">Routes</button><button class="header-tab" data-pane="flows">Flows</button></div>` : ''}
 </header>
 
 <div class="app-shell">
@@ -1074,14 +1744,20 @@ function serveDocsUI(routes, config) {
     <div class="sidebar-search">
       <input id="search" type="text" placeholder="Filter routes…" autocomplete="off" spellcheck="false" />
     </div>
-    <div class="sidebar-label">Groups</div>
-    <nav class="sidebar-nav" id="sidebar-nav">
-      ${sidebarHtml}
-    </nav>
+    <div class="sidebar-pane is-active" id="sidebar-pane-routes" data-pane="routes">
+      <div class="sidebar-label">Groups</div>
+      <nav class="sidebar-nav" id="sidebar-nav">
+        ${sidebarHtml}
+      </nav>
+    </div>
+    ${flows.length > 0 ? `<div class="sidebar-pane" id="sidebar-pane-flows" data-pane="flows"><div class="sidebar-label">Flows</div><nav class="sidebar-subnav" id="sidebar-flow-nav">${flowSidebarHtml}</nav></div>` : ''}
   </aside>
 
   <main class="content" id="content">
-    ${sectionsHtml}
+    <div class="content-pane is-active" id="content-pane-routes" data-pane="routes">
+      ${sectionsHtml}
+    </div>
+    ${flows.length > 0 ? `<div class="content-pane" id="content-pane-flows" data-pane="flows">${flowSectionsHtml}</div>` : ''}
   </main>
 
 </div>
@@ -1095,11 +1771,45 @@ function serveDocsUI(routes, config) {
 (function () {
   var content     = document.getElementById('content');
   var sidebarNav  = document.getElementById('sidebar-nav');
+  var sidebarFlowNav = document.getElementById('sidebar-flow-nav');
+  var headerTabs = document.getElementById('header-tabs');
   var searchInput = document.getElementById('search');
   var ROUTES = ${JSON.stringify(routes)};
+  var FLOWS = ${JSON.stringify(flows)};
   var META   = ${JSON.stringify({ title: meta.title, version: meta.version, description: meta.description })};
+  var FLOW_RUN_ENDPOINT = ${JSON.stringify(config.docsPath + '/__flows/run')};
+  var CLIENT_METHOD_CLASSES = ${JSON.stringify(Object.keys(METHOD_STYLES).reduce(function (acc, key) {
+    acc[key] = METHOD_STYLES[key].cls;
+    return acc;
+  }, { OTHER: 'method-other' }))};
+  var activePane = 'routes';
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
+  function setActivePane(pane) {
+    activePane = pane;
+
+    document.querySelectorAll('.sidebar-pane').forEach(function (el) {
+      el.classList.toggle('is-active', el.getAttribute('data-pane') === pane);
+    });
+    document.querySelectorAll('.content-pane').forEach(function (el) {
+      el.classList.toggle('is-active', el.getAttribute('data-pane') === pane);
+    });
+
+    if (headerTabs) {
+      headerTabs.querySelectorAll('.header-tab').forEach(function (el) {
+        var isActive = el.getAttribute('data-pane') === pane;
+        el.classList.toggle('is-active-routes', isActive && pane === 'routes');
+        el.classList.toggle('is-active-flows', isActive && pane === 'flows');
+      });
+    }
+
+    if (searchInput) {
+      searchInput.placeholder = pane === 'flows' ? 'Filter flows…' : 'Filter routes…';
+    }
+
+    applyFilter(searchInput ? searchInput.value : '');
+  }
+
   function expandDetailRow(row) {
     var tbody    = row.closest('tbody');
     var detailId = row.getAttribute('data-detail');
@@ -1168,6 +1878,31 @@ function serveDocsUI(routes, config) {
     }
   });
 
+  if (sidebarFlowNav) {
+    sidebarFlowNav.addEventListener('click', function (e) {
+      var flowBtn = e.target.closest('.sidebar-flow-item');
+      if (!flowBtn) return;
+
+      var index = flowBtn.getAttribute('data-flow-index');
+      var target = document.getElementById('flow-' + index);
+      if (!target) return;
+
+      sidebarFlowNav.querySelectorAll('.sidebar-flow-item.is-active').forEach(function (el) {
+        el.classList.remove('is-active');
+      });
+      flowBtn.classList.add('is-active');
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
+
+  if (headerTabs) {
+    headerTabs.addEventListener('click', function (e) {
+      var tabBtn = e.target.closest('.header-tab');
+      if (!tabBtn) return;
+      setActivePane(tabBtn.getAttribute('data-pane') || 'routes');
+    });
+  }
+
   // ── Sidebar active group via IntersectionObserver ────────────────────────────
   var sections   = content.querySelectorAll('.route-group');
   var groupElMap = {};
@@ -1199,7 +1934,7 @@ function serveDocsUI(routes, config) {
   function applyFilter(q) {
     q = q.toLowerCase().trim();
 
-    content.querySelectorAll('.route-group').forEach(function (section) {
+    content.querySelectorAll('#content-pane-routes .route-group').forEach(function (section) {
       var groupName   = section.getAttribute('data-group');
       var sidebarGrp  = groupElMap[groupName];
       var hasVisible  = false;
@@ -1227,12 +1962,35 @@ function serveDocsUI(routes, config) {
         if (match) hasVisible = true;
       });
 
-      section.style.display = hasVisible || q === '' ? '' : 'none';
-      if (sidebarGrp) sidebarGrp.style.display = hasVisible || q === '' ? '' : 'none';
+      var routeVisible = activePane === 'routes' && (hasVisible || q === '');
+      section.style.display = routeVisible ? '' : 'none';
+      if (sidebarGrp) sidebarGrp.style.display = routeVisible ? '' : 'none';
     });
+
+    content.querySelectorAll('#content-pane-flows .flow-card').forEach(function (card) {
+      var match = q === '' || card.textContent.toLowerCase().includes(q);
+      var flowVisible = activePane === 'flows' && match;
+      card.style.display = flowVisible ? '' : 'none';
+
+      if (sidebarFlowNav) {
+        var index = card.getAttribute('data-flow-index');
+        var flowBtn = sidebarFlowNav.querySelector('.sidebar-flow-item[data-flow-index="' + index + '"]');
+        if (flowBtn) flowBtn.style.display = flowVisible ? '' : 'none';
+      }
+    });
+
+    var flowGroup = document.getElementById('flow-group');
+    if (flowGroup) {
+      var hasVisibleFlows = Array.prototype.some.call(
+        flowGroup.querySelectorAll('.flow-card'),
+        function (card) { return card.style.display !== 'none'; }
+      );
+      flowGroup.style.display = activePane === 'flows' && (hasVisibleFlows || q === '') ? '' : 'none';
+    }
   }
 
   searchInput.addEventListener('input', function () { applyFilter(this.value); });
+  setActivePane('routes');
 
   // ── Copy as cURL ─────────────────────────────────────────────────────────────
 
@@ -1553,6 +2311,194 @@ function serveDocsUI(routes, config) {
     try { document.execCommand('copy'); cb(); } catch (_) {}
     document.body.removeChild(ta);
   }
+
+  function escapeHtmlClient(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function formatJsonBlock(value) {
+    return escapeHtmlClient(JSON.stringify(value, null, 2));
+  }
+
+  function renderFlowTimeline(result) {
+    if (!result || !Array.isArray(result.steps) || result.steps.length === 0) {
+      if (result && result.error) {
+        return '<div class="flow-step-error">' + escapeHtmlClient(result.error) + '</div>';
+      }
+      return '<div class="flow-empty-note">Not run yet.</div>';
+    }
+
+    var summary =
+      '<div class="flow-summary-card">' +
+      '<div class="flow-summary-main">' +
+      '<span class="flow-status-pill ' + (result.ok ? 'pass' : 'fail') + '">' + (result.ok ? 'PASS' : 'FAIL') + '</span>' +
+      '<span class="flow-summary-meta">' + escapeHtmlClient(result.flow || 'Flow') + '</span>' +
+      '<span class="flow-summary-meta">' + escapeHtmlClient(String(result.durationMs || 0)) + 'ms</span>' +
+      '</div>' +
+      '<div class="flow-summary-meta"><span class="flow-vars-chip">' + escapeHtmlClient(String(Object.keys(result.vars || {}).length)) + ' vars</span></div>' +
+      '</div>';
+
+    var stepsHtml = result.steps.map(function (step) {
+      var request = step.request || null;
+      var response = step.response || null;
+      var requestBlock = request
+        ? {
+          method: request.method,
+          url: request.url,
+          path: request.path,
+          query: request.query,
+          headers: request.headers,
+          body: request.body,
+        }
+        : { note: 'Request not built.' };
+      var responseBlock = response
+        ? {
+          status: response.status,
+          headers: response.headers,
+          body: response.body,
+        }
+        : { note: 'No response captured.' };
+
+      return (
+        '<div class="flow-step-card ' + (step.ok ? 'pass' : 'fail') + '">' +
+        '<div class="flow-step-header">' +
+        '<div>' +
+        '<div class="flow-step-title">' +
+        '<span class="flow-step-name">' + escapeHtmlClient(step.name || step.id) + '</span>' +
+        (request ? '<span class="method-mini ' + (CLIENT_METHOD_CLASSES[request.method] || CLIENT_METHOD_CLASSES.OTHER) + '">' + escapeHtmlClient(request.method) + '</span>' : '') +
+        '</div>' +
+        '<div class="flow-step-path-inline">' + escapeHtmlClient(request ? (request.path || request.url || '') : step.id) + '</div>' +
+        '</div>' +
+        '<div class="flow-step-badges">' +
+        '<span class="flow-mini-badge">' + (step.status === null ? '-' : escapeHtmlClient(String(step.status))) + '</span>' +
+        '<span class="flow-mini-badge">' + escapeHtmlClient(String(step.durationMs || 0)) + 'ms</span>' +
+        '</div>' +
+        '</div>' +
+        '<div class="flow-step-sections">' +
+        '<div class="flow-step-section"><div class="flow-step-section-title">Request</div><pre class="flow-step-pre">' + formatJsonBlock(requestBlock) + '</pre></div>' +
+        '<div class="flow-step-section"><div class="flow-step-section-title">Response</div><pre class="flow-step-pre">' + formatJsonBlock(responseBlock) + '</pre></div>' +
+        '<div class="flow-step-section"><div class="flow-step-section-title">Extracted Vars</div><pre class="flow-step-pre">' + formatJsonBlock(step.extracted || {}) + '</pre></div>' +
+        '<div class="flow-step-section"><div class="flow-step-section-title">Flow Vars</div><pre class="flow-step-pre">' + formatJsonBlock(result.vars || {}) + '</pre></div>' +
+        '</div>' +
+        (step.error ? '<div class="flow-step-error">' + escapeHtmlClient(step.error) + '</div>' : '') +
+        '</div>'
+      );
+    }).join('');
+
+    return summary + stepsHtml;
+  }
+
+  function setFlowResult(card, result, requestOk) {
+    var timelineEl = card.querySelector('.flow-result-timeline');
+    var jsonEl = card.querySelector('.flow-result');
+    if (!timelineEl || !jsonEl) return;
+
+    timelineEl.innerHTML = renderFlowTimeline(result);
+    jsonEl.textContent = JSON.stringify(result, null, 2);
+    timelineEl.classList.toggle('is-pass', !!(requestOk && result.ok));
+    timelineEl.classList.toggle('is-fail', !(requestOk && result.ok));
+    jsonEl.classList.toggle('is-pass', !!(requestOk && result.ok));
+    jsonEl.classList.toggle('is-fail', !(requestOk && result.ok));
+  }
+
+  function collectFlowInputs(card) {
+    var input = {};
+    card.querySelectorAll('.flow-input').forEach(function (el) {
+      var name = el.getAttribute('data-input-name');
+      if (name && el.value !== '') input[name] = el.value;
+    });
+    return input;
+  }
+
+  content.addEventListener('click', function (e) {
+    var tabBtn = e.target.closest('.flow-result-tab');
+    if (tabBtn) {
+      var block = tabBtn.closest('.flow-result-block');
+      if (!block) return;
+      var tab = tabBtn.getAttribute('data-tab');
+      block.querySelectorAll('.flow-result-tab').forEach(function (el) {
+        el.classList.toggle('is-active', el === tabBtn);
+      });
+      var timeline = block.querySelector('.flow-result-timeline');
+      var json = block.querySelector('.flow-result');
+      if (timeline) timeline.classList.toggle('is-active', tab === 'timeline');
+      if (json) json.classList.toggle('is-active', tab === 'json');
+      return;
+    }
+
+    var runBtn = e.target.closest('.run-flow-btn');
+    if (!runBtn) return;
+
+    var index = Number(runBtn.getAttribute('data-flow-index'));
+    var flow = FLOWS[index];
+    var card = document.getElementById('flow-' + index);
+    if (!flow || !card) return;
+
+    var resultEl = card.querySelector('.flow-result');
+    var timelineEl = card.querySelector('.flow-result-timeline');
+    var baseUrlEl = card.querySelector('.flow-base-url');
+    var payload = {
+      flow: flow,
+      input: collectFlowInputs(card),
+      baseUrl: baseUrlEl && baseUrlEl.value ? baseUrlEl.value : window.location.origin,
+      bail: true
+    };
+
+    runBtn.disabled = true;
+    runBtn.textContent = 'Running...';
+    resultEl.classList.remove('is-pass', 'is-fail');
+    if (timelineEl) timelineEl.classList.remove('is-pass', 'is-fail');
+    resultEl.textContent = 'Running flow...';
+    if (timelineEl) timelineEl.innerHTML = '<div class="flow-empty-note">Running flow...</div>';
+
+    fetch(FLOW_RUN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      return res.json().then(function (data) {
+        return { ok: res.ok, data: data };
+      });
+    }).then(function (result) {
+      setFlowResult(card, result.data, result.ok);
+    }).catch(function (error) {
+      setFlowResult(card, {
+        ok: false,
+        flow: flow.name,
+        durationMs: 0,
+        steps: [],
+        vars: {},
+        error: String(error && error.message ? error.message : error),
+      }, false);
+    }).finally(function () {
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run flow';
+    });
+  });
+
+  content.addEventListener('click', function (e) {
+    var exportBtn = e.target.closest('.export-flow-btn');
+    if (!exportBtn) return;
+
+    var index = Number(exportBtn.getAttribute('data-flow-index'));
+    var flow = FLOWS[index];
+    if (!flow) return;
+
+    var json = JSON.stringify(flow, null, 2);
+    var blob = new Blob([json], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (flow.name || 'flow').replace(/[^a-zA-Z0-9_-]/g, '_') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
 })();
 </script>
 

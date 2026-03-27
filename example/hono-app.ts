@@ -13,11 +13,14 @@
  */
 
 import { Hono } from 'hono';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Context } from 'hono';
 import { serve } from '@hono/node-server';
 import { honoAdapter, defineRoute, defineSchema, s } from '../src/adapters/hono';
 import type { UserConfig } from '../src/index';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = new Hono();
 
 // ─── Type definitions ─────────────────────────────────────────────────────────
@@ -76,6 +79,7 @@ defineSchema('Product', productSchema);
 
 const docsConfig: UserConfig = {
   docsPath: '/api/docs',
+  flowsPath: path.join(__dirname, 'doctreen-flows-hono'),
   meta: {
     title:       'My Hono API (TypeScript)',
     version:     '1.0.0',
@@ -348,6 +352,7 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('');
   console.log('  Server running  →  http://localhost:' + info.port);
   console.log('  API Docs        →  http://localhost:' + info.port + '/api/docs');
+  console.log('  Flows           →  open the Flows section in /api/docs');
   console.log('');
   console.log('  All schemas fully resolved at startup — no curl needed to populate docs.');
   console.log('');

@@ -4,6 +4,9 @@
   "description": "Auto-generates and serves API documentation for Node.js backends via middleware",
   "main": "src/index.js",
   "types": "src/index.d.ts",
+  "bin": {
+    "doctreen-flow": "./bin/doctreen-flow.js"
+  },
   "exports": {
     ".": {
       "types": "./src/index.d.ts",
@@ -24,6 +27,10 @@
     "./koa": {
       "types": "./src/adapters/koa.d.ts",
       "default": "./src/adapters/koa.js"
+    },
+    "./flows": {
+      "types": "./src/flows/index.d.ts",
+      "default": "./src/flows/index.js"
     }
   },
   "scripts": {

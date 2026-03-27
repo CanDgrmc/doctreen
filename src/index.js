@@ -21,11 +21,11 @@
  */
 
 /**
- * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }> }} UserConfig
+ * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string }} UserConfig
  */
 
 /**
- * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }> }} NormalizedConfig
+ * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null }} NormalizedConfig
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,6 +172,8 @@ function normalizeConfig(userConfig = {}) {
     liveReload: Boolean(userConfig.liveReload),
 
     groups: userConfig.groups || {},
+    flows: Array.isArray(userConfig.flows) ? userConfig.flows : null,
+    flowsPath: userConfig.flowsPath || null,
   };
 }
 
@@ -511,4 +513,5 @@ module.exports = {
   defineSchema,
   parseJSDoc,
   s,
+  flows: require('./flows/index'),
 };

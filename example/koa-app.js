@@ -23,6 +23,7 @@
 
 const Koa    = require('koa');
 const Router = require('@koa/router');
+const path = require('path');
 const { bodyParser } = require('@koa/bodyparser');
 const { koaAdapter, defineRoute, defineSchema, s } = require('../src/adapters/koa');
 
@@ -306,6 +307,7 @@ router.get('/health', (ctx) => { ctx.body = { status: 'ok' }; });
 
 koaAdapter(router, {
   docsPath: '/api/docs',
+  flowsPath: path.join(__dirname, 'doctreen-flows-koa'),
   meta: {
     title:       'My Koa API',
     version:     '1.0.0',
@@ -333,6 +335,7 @@ app.listen(PORT, () => {
   console.log('');
   console.log('  Server running  →  http://localhost:' + PORT);
   console.log('  API Docs        →  http://localhost:' + PORT + '/api/docs');
+  console.log('  Flows           →  open the Flows section in /api/docs');
   console.log('');
   console.log('  All schemas fully resolved at startup — no curl needed to populate docs.');
   console.log('');

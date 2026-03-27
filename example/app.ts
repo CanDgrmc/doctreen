@@ -13,10 +13,13 @@
  */
 
 import express, { Request, Response, Router } from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expressAdapter, defineRoute } from '../src/adapters/express';
 import { s } from '../src/index';
 import type { UserConfig } from '../src/index';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json());
 
@@ -466,6 +469,7 @@ app.get('/metrics', (_req: Request, res: Response) => res.json({ uptime: process
 
 const docsConfig: UserConfig = {
   docsPath: '/api/docs',
+  flowsPath: path.join(__dirname, 'doctreen-flows'),
 
   // ── API-level description ──────────────────────────────────────────────────
   meta: {
@@ -502,6 +506,7 @@ app.listen(PORT, () => {
   console.log('');
   console.log('  Server running  →  http://localhost:' + PORT);
   console.log('  API Docs        →  http://localhost:' + PORT + '/api/docs');
+  console.log('  Flows           →  open the Flows section in /api/docs');
   console.log('');
   console.log('  Descriptions visible at all three levels: API, group, and route.');
   console.log('');

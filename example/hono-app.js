@@ -24,9 +24,12 @@
  */
 
 import { Hono } from 'hono';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { honoAdapter, defineRoute, defineSchema, s } from '../src/adapters/hono.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = new Hono();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -296,6 +299,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 
 honoAdapter(app, {
   docsPath: '/api/docs',
+  flowsPath: path.join(__dirname, 'doctreen-flows-hono'),
   meta: {
     title:       'My Hono API',
     version:     '1.0.0',
@@ -315,5 +319,6 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('');
   console.log('  Server running  →  http://localhost:' + info.port);
   console.log('  API Docs        →  http://localhost:' + info.port + '/api/docs');
+  console.log('  Flows           →  open the Flows section in /api/docs');
   console.log('');
 });

@@ -28,10 +28,13 @@
  */
 
 import Fastify, { FastifyRequest, FastifyReply } from 'fastify';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fastifyAdapter, defineRoute, defineSchema } from '../src/adapters/fastify';
 import { s } from '../src/index';
 import type { UserConfig } from '../src/index';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fastify = Fastify({ logger: false });
 
 // ─── Type definitions ─────────────────────────────────────────────────────────
@@ -90,6 +93,7 @@ const productSchema = defineSchema('Product', s.object({
 
 const docsConfig: UserConfig = {
   docsPath: '/api/docs',
+  flowsPath: path.join(__dirname, 'doctreen-flows-fastify'),
   meta: {
     title: 'My Fastify API (TypeScript)',
     version: '1.0.0',
@@ -406,6 +410,7 @@ fastify.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
   console.log('');
   console.log('  Server running  →  http://localhost:' + PORT);
   console.log('  API Docs        →  http://localhost:' + PORT + '/api/docs');
+  console.log('  Flows           →  open the Flows section in /api/docs');
   console.log('');
   console.log('  All schemas fully resolved at startup — no curl needed to populate docs.');
   console.log('');

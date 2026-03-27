@@ -11,6 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema, s } = require('../index');
+const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 
 /**
@@ -202,6 +203,7 @@ function fastifyAdapter(fastify, userConfig) {
   fastify.addHook('onRoute', function (routeOptions) {
     // Fastify 4 uses routeOptions.url; Fastify 5 uses routeOptions.path
     const path = routeOptions.url || routeOptions.path || '';
+    if (path === config.docsPath || path === config.docsPath + '/__flows/run') return;
     if (!path || shouldExclude(path, config.exclude)) return;
 
     const methods = Array.isArray(routeOptions.method)
@@ -224,8 +226,17 @@ function fastifyAdapter(fastify, userConfig) {
 
   // Serve the documentation UI
   fastify.get(config.docsPath, function serveDocs(_req, reply) {
-    const html = serveDocsUI(registry.getAll(), config);
+    const html = serveDocsUI(registry.getAll(), config, { flows: getUiFlows(config) });
     reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+  });
+
+  fastify.post(config.docsPath + '/__flows/run', async function runDocsFlow(req, reply) {
+    try {
+      const result = await runFlowPayload(req.body || {});
+      reply.code(result.ok ? 200 : 422).header('Content-Type', 'application/json; charset=utf-8').send(result);
+    } catch (error) {
+      reply.code(400).header('Content-Type', 'application/json; charset=utf-8').send({ ok: false, error: error.message || String(error) });
+    }
   });
 }
 

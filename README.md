@@ -1,8 +1,8 @@
 # DocTreen
 
-Auto-generate and serve interactive API documentation for your Node.js backend — zero configuration, zero runtime dependencies.
+Auto-generate and serve interactive API documentation and reusable request flows for your Node.js backend — zero configuration, zero runtime dependencies.
 
-DocTreen introspects your Express, Fastify, Hono, or Koa app at runtime, parses your JSDoc comments, and serves a fully interactive documentation UI at `/docs`.
+DocTreen introspects your Express, Fastify, Hono, or Koa app at runtime, parses your JSDoc comments, loads request-flow presets, and serves a fully interactive documentation UI at `/docs`.
 
 ![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/doctreen-img.png)
 
@@ -114,6 +114,7 @@ app.use(expressAdapter(app, {
   docsPath: '/docs',
   enabled: true,
   liveReload: false,
+  flowsPath: './doctreen-flows',
   exclude: ['/health'],
   groups: {
     Users: ['/users', '/users/:id'],
@@ -140,11 +141,231 @@ fastifyAdapter(fastify, {
 | `docsPath` | `string` | `'/docs'` | URL path where the docs UI is served |
 | `enabled` | `boolean` | `NODE_ENV !== 'production'` | Disable to hide docs entirely |
 | `liveReload` | `boolean` | `false` | Re-introspect routes on every docs hit |
+| `flows` | `FlowDefinition[]` | `null` | Flow presets embedded directly into the docs UI |
+| `flowsPath` | `string` | `'./doctreen-flows'` if present | Directory of `*.json` flow presets to load into the docs UI |
 | `exclude` | `string \| RegExp \| Array` | `[]` | Routes to exclude from docs |
 | `groups` | `Record<string, string \| string[]>` | `{}` | Group routes into named sections |
 | `meta.title` | `string` | `'API Documentation'` | Title shown in the UI |
 | `meta.version` | `string` | — | API version label |
 | `meta.description` | `string` | — | Description shown below the title |
+
+---
+
+## Request Flows
+
+DocTreen can load named request-flow presets into the docs UI and run them through the same shared engine used by the CLI.
+
+Flows are first-class in the UI:
+
+- a top-level **Flows** tab keeps flows separate from crowded route docs
+- the Flows tab includes a built-in guide for writing flow JSON
+- each flow can collect runtime inputs and override `baseUrl`
+- results are shown in both a visual execution timeline and raw JSON
+- the same flow file can be reused for documentation, smoke tests, and CI
+
+### Directory-based loading
+
+If a `./doctreen-flows` directory exists, DocTreen will load every `*.json` file in it automatically. You can also point at a custom directory:
+
+```js
+const path = require('path');
+
+app.use(expressAdapter(app, {
+  docsPath: '/docs',
+  flowsPath: path.join(__dirname, 'doctreen-flows'),
+  meta: { title: 'My API', version: '1.0.0' },
+}));
+```
+
+### Inline flows
+
+You can embed flows directly in config:
+
+```js
+app.use(expressAdapter(app, {
+  flows: [
+    {
+      version: 1,
+      name: 'Login smoke',
+      baseUrl: 'http://localhost:3000',
+      steps: [
+        {
+          id: 'login',
+          request: {
+            method: 'POST',
+            path: '/auth/login',
+            body: { email: 'alice@example.com', password: 'secret' },
+          },
+          assert: { status: 200 },
+          extract: { token: { from: 'body', path: '$.token' } },
+        },
+      ],
+    },
+  ],
+}));
+```
+
+### Flow format
+
+```json
+{
+  "version": 1,
+  "name": "User onboarding",
+  "baseUrl": "http://localhost:3000",
+  "inputs": {
+    "email": { "type": "string", "required": true }
+  },
+  "steps": [
+    {
+      "id": "create-user",
+      "request": {
+        "method": "POST",
+        "path": "/users",
+        "body": { "email": "{{input.email}}" }
+      },
+      "extract": {
+        "userId": { "from": "body", "path": "$.id" }
+      },
+      "assert": {
+        "status": 201
+      }
+    },
+    {
+      "id": "get-user",
+      "request": {
+        "method": "GET",
+        "path": "/users/{{vars.userId}}"
+      },
+      "assert": {
+        "status": 200,
+        "body": {
+          "$.id": "{{vars.userId}}"
+        }
+      }
+    }
+  ]
+}
+```
+
+### Complete flow example
+
+```json
+{
+  "version": 1,
+  "name": "User onboarding",
+  "description": "Create a user, fetch it back, then delete it.",
+  "baseUrl": "http://localhost:3000",
+  "inputs": {
+    "email": { "type": "string", "required": true },
+    "name": { "type": "string", "required": true }
+  },
+  "steps": [
+    {
+      "id": "create-user",
+      "request": {
+        "method": "POST",
+        "path": "/users",
+        "body": {
+          "email": "{{input.email}}",
+          "name": "{{input.name}}"
+        }
+      },
+      "extract": {
+        "userId": { "from": "body", "path": "$.id" }
+      },
+      "assert": {
+        "status": 201,
+        "body": {
+          "$.email": "{{input.email}}"
+        }
+      }
+    },
+    {
+      "id": "get-user",
+      "request": {
+        "method": "GET",
+        "path": "/users/{{vars.userId}}"
+      },
+      "assert": {
+        "status": 200,
+        "body": {
+          "$.id": "{{vars.userId}}"
+        },
+        "exists": ["$.email", "$.createdAt"]
+      }
+    }
+  ]
+}
+```
+
+### Variable namespaces
+
+```json
+{
+  "baseUrl": "{{env.baseUrl}}",
+  "request": {
+    "path": "/users/{{vars.userId}}",
+    "body": {
+      "email": "{{input.email}}"
+    }
+  }
+}
+```
+
+- `{{input.*}}`: runtime values entered in the docs UI or CLI
+- `{{vars.*}}`: values extracted from previous steps
+- `{{env.*}}`: values coming from the flow file or environment overrides
+
+### Extract + assert example
+
+```json
+{
+  "extract": {
+    "userId": { "from": "body", "path": "$.id" },
+    "etag":   { "from": "header", "path": "etag" }
+  },
+  "assert": {
+    "status": 201,
+    "body": {
+      "$.email": "{{input.email}}"
+    },
+    "exists": ["$.id", "$.createdAt"]
+  }
+}
+```
+
+### In the docs UI
+
+- Flow presets appear in their own **Flows** tab
+- The Flows tab includes a built-in information section with JSON examples and creation guidance
+- Each flow can collect runtime inputs, override `baseUrl`, and run via the docs server
+- Results are shown as both:
+  - an execution timeline with step-by-step request/response cards
+  - raw JSON from the shared flow runner
+- The same preset can work as both a demo scenario and an integration-test asset
+
+### CLI runner
+
+DocTreen also ships a small CLI for running the same flow files headlessly:
+
+```bash
+doctreen-flow run doctreen-flows/user-onboarding.json --input email=alice@example.com --input name='Alice Smith'
+```
+
+Use named or explicit environment files:
+
+```bash
+doctreen-flow run doctreen-flows/user-onboarding.json --env local
+doctreen-flow run doctreen-flows/user-onboarding.json --env ./doctreen-flows/environments/staging.json --report json
+```
+
+Supported CLI flags:
+
+- `--env <name|file>`
+- `--base-url <url>`
+- `--input key=value`
+- `--no-bail`
+- `--report text|json`
 
 ---
 
@@ -340,6 +561,7 @@ Errors appear in the **Response** column of each route's detail panel (colour-co
 - Color-coded method pills (GET, POST, PUT, PATCH, DELETE)
 - Property count badge on routes with defined schemas
 - Search/filter by path or method
+- Lives in its own top-level **Routes** tab when flows are enabled
 
 ### Route Detail Panel
 - Full schema tree for request body, query params, path params, and response
@@ -348,6 +570,17 @@ Errors appear in the **Response** column of each route's detail panel (colour-co
 - **Copy as cURL** — generates a ready-to-run curl command with example values
 - **Copy for LLM** — generates a structured markdown prompt describing the endpoint (useful for AI-assisted development)
 - **Export to Postman** — downloads a Postman Collection v2.1 JSON file; error responses are included as saved example responses
+
+### Flow Runner
+- Loads request-flow presets from `flows` config or `flowsPath`
+- Uses a dedicated top-level **Flows** tab so flows stay separate from route documentation
+- Includes an information section with flow authoring guidance and JSON examples
+- Runs named flows directly inside the docs UI
+- Collects runtime inputs and supports per-run `baseUrl` overrides
+- Shows flow execution results as:
+  - a visual timeline with per-step request/response details
+  - raw JSON output from the shared runner
+- Uses the same flow definition format as the `doctreen-flow` CLI
 
 ---
 
@@ -459,27 +692,31 @@ import type { RouteSchemas, KoaRouterLike } from 'doctreen/koa';
 2. On the first request to `/docs`, DocTreen walks `app._router.stack` to discover all registered routes (lazy introspection — solves the middleware-before-routes ordering problem)
 3. Route handlers are wrapped so real HTTP traffic populates request/response schemas automatically
 4. JSDoc comments on handler functions are parsed at runtime via `fn.toString()`
-5. The UI is served as a self-contained HTML page with zero external dependencies
+5. If flows are configured, `POST /docs/__flows/run` executes them through the shared runner when `docsPath` is `/docs`
+6. The UI is served as a self-contained HTML page with zero external dependencies
 
 ### Fastify
 1. `fastifyAdapter(fastify, config)` registers a Fastify `onRoute` hook and adds the docs GET route
 2. Every route added after `fastifyAdapter` is captured by the hook at registration time — no traffic needed
 3. Schema resolution order: `defineRoute` → Fastify native JSON Schema → JSDoc block comment
 4. Named schemas registered with `defineSchema` are resolved when referenced in JSDoc tags
+5. If flows are configured, `POST <docsPath>/__flows/run` executes them through the shared runner
 
 ### Hono
 1. `honoAdapter(app, config)` adds a GET route at `docsPath` to the Hono app
 2. On the first request to the docs page, `app.routes` is read — all routes registered by then are shown
 3. Can be called **before or after** your routes (lazy read at request time)
 4. Schema resolution order: `defineRoute` → JSDoc block comment
-5. Works on any runtime: Node.js (via `@hono/node-server`), Bun, Deno, Cloudflare Workers
+5. If flows are configured, `POST <docsPath>/__flows/run` executes them through the shared runner
+6. Works on any runtime: Node.js (via `@hono/node-server`), Bun, Deno, Cloudflare Workers
 
 ### Koa
 1. `koaAdapter(router, config)` adds a GET route at `docsPath` to the `@koa/router` instance
 2. On the first request to the docs page, `router.stack` is read — all routes registered by then are shown
 3. Can be called **before or after** your routes (lazy read at request time)
 4. Schema resolution order: `defineRoute` → JSDoc block comment
-5. Mount the router on the Koa app as usual: `app.use(router.routes())`
+5. If flows are configured, `POST <docsPath>/__flows/run` executes them through the shared runner
+6. Mount the router on the Koa app as usual: `app.use(router.routes())`
 
 ---
 
@@ -498,14 +735,14 @@ npm run example:koa:ts      # Koa TS        → http://localhost:3003/api/docs
 
 | File | Framework | Notes |
 |------|-----------|-------|
-| [`example/app.js`](./example/app.js) | Express | JSDoc, `defineRoute`, named schemas, error responses |
-| [`example/app.ts`](./example/app.ts) | Express | Fully typed with `defineRoute` generics |
-| [`example/fastify-app.js`](./example/fastify-app.js) | Fastify | JSDoc, `defineRoute`, Fastify native JSON Schema |
-| [`example/fastify-app.ts`](./example/fastify-app.ts) | Fastify | Fully typed with Fastify route generics |
-| [`example/hono-app.js`](./example/hono-app.js) | Hono | JSDoc, `defineRoute`; run via `npx tsx` |
-| [`example/hono-app.ts`](./example/hono-app.ts) | Hono | Fully typed with Hono `Context` |
-| [`example/koa-app.js`](./example/koa-app.js) | Koa | JSDoc, `defineRoute`; uses `@koa/router` |
-| [`example/koa-app.ts`](./example/koa-app.ts) | Koa | Fully typed with `Router.RouterContext` |
+| [`example/app.js`](./example/app.js) | Express | JSDoc, `defineRoute`, named schemas, error responses, flow presets |
+| [`example/app.ts`](./example/app.ts) | Express | Fully typed with `defineRoute` generics, flow presets |
+| [`example/fastify-app.js`](./example/fastify-app.js) | Fastify | JSDoc, `defineRoute`, Fastify native JSON Schema, flow presets |
+| [`example/fastify-app.ts`](./example/fastify-app.ts) | Fastify | Fully typed with Fastify route generics, flow presets |
+| [`example/hono-app.js`](./example/hono-app.js) | Hono | JSDoc, `defineRoute`; run via `npx tsx`; flow presets |
+| [`example/hono-app.ts`](./example/hono-app.ts) | Hono | Fully typed with Hono `Context`, flow presets |
+| [`example/koa-app.js`](./example/koa-app.js) | Koa | JSDoc, `defineRoute`; uses `@koa/router`; flow presets |
+| [`example/koa-app.ts`](./example/koa-app.ts) | Koa | Fully typed with `Router.RouterContext`, flow presets |
 
 ---
 

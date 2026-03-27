@@ -1,3 +1,5 @@
+import type { FlowDefinition } from './flows/index';
+
 /**
  * A recursive schema node produced by `inferSchema`.
  * Intentionally lightweight — not JSON Schema, just enough to show
@@ -127,6 +129,18 @@ export interface UserConfig {
    * @example { users: { description: 'Manage user accounts.' }, admin: { description: 'Admin-only operations.' } }
    */
   groups?: Record<string, { description?: string }>;
+
+  /**
+   * Flow presets to embed directly into the docs UI.
+   * When omitted, DocTreen will try to load `./doctreen-flows/*.json`.
+   */
+  flows?: FlowDefinition[];
+
+  /**
+   * Directory containing flow JSON files.
+   * Each `*.json` file is treated as a flow definition.
+   */
+  flowsPath?: string;
 }
 
 /**
@@ -139,6 +153,8 @@ export interface NormalizedConfig {
   exclude: Array<string | RegExp>;
   liveReload: boolean;
   groups: Record<string, { description: string }>;
+  flows: FlowDefinition[] | null;
+  flowsPath: string | null;
 }
 
 /**
@@ -272,3 +288,5 @@ export interface JSDocInfo {
  * Returns `null` if no JSDoc block is found or nothing useful is extracted.
  */
 export declare function parseJSDoc(fn: Function): JSDocInfo | null;
+
+export * as flows from './flows/index';

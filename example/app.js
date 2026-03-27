@@ -23,6 +23,7 @@
  */
 
 const express = require('express');
+const path = require('path');
 const { expressAdapter, defineRoute, defineSchema, s } = require('../src/adapters/express');
 
 const app = express();
@@ -405,6 +406,7 @@ app.get('/metrics', (_req, res) => res.json({ uptime: process.uptime() }));
 app.use(
   expressAdapter(app, {
     docsPath: '/api/docs',
+    flowsPath: path.join(__dirname, 'doctreen-flows'),
     meta: {
       title:       'My Awesome API',
       version:     '2.1.0',
@@ -431,5 +433,6 @@ app.listen(PORT, () => {
   console.log('');
   console.log('  Tip: schemas appear in the docs after you hit each endpoint at least once.');
   console.log('  Run the curl commands in the file comments, then refresh /api/docs.');
+  console.log('  Flows: open the Flows section in /api/docs to run the example request flow.');
   console.log('');
 });
