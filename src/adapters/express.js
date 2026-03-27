@@ -19,6 +19,7 @@
  * @typedef {{
  *   route?: { path: string, methods: Record<string, boolean>, stack: ExpressHandlerLayer[] },
  *   regexp:  { fast_slash?: boolean, fast_star?: boolean, source: string },
+ *   keys?:   Array<{ name: string | number, optional?: boolean }>,
  *   name?:   string,
  *   handle?: Function & { stack?: ExpressLayer[] }
  * }} ExpressLayer
@@ -66,8 +67,58 @@ function normalizeErrors(errors) {
  * @returns {string[]}
  */
 function extractParamsFromPath(routePath) {
-  const matches = routePath.match(/:([^/]+)/g);
+  const matches = routePath.match(/:([^/?]+)/g);
   return matches ? matches.map((p) => p.slice(1)) : [];
+}
+
+/**
+ * normalizeJoinedPath
+ *
+ * Joins a parent prefix and child path without introducing duplicate slashes.
+ *
+ * @param {string} prefix
+ * @param {string} path
+ * @returns {string}
+ */
+function normalizeJoinedPath(prefix, path) {
+  const full = `${prefix || ''}${path || ''}`;
+  const normalized = full.replace(/\/{2,}/g, '/');
+  return normalized || '/';
+}
+
+/**
+ * regexpToMountPath
+ *
+ * Reconstructs an Express router mount path from the layer regexp and keys.
+ * Express stores mounted router params in `layer.keys`, which lets us recover
+ * `/:id` instead of leaking the raw regexp fragment into the docs.
+ *
+ * @param {ExpressLayer} layer
+ * @returns {string}
+ */
+function regexpToMountPath(layer) {
+  const keys = Array.isArray(layer.keys) ? layer.keys : [];
+  let keyIndex = 0;
+
+  let path = layer.regexp.source
+    .replace(/^\^/, '')
+    .replace(/\$$/, '')
+    .replace(/\\\//g, '/')
+    .replace(/\/\?\(\?=\/\|\$\)$/, '')
+    .replace(/\/\?$/, '');
+
+  path = path.replace(/\(\?:\/\(\[\^\/\]\+\?\)\)(\?)?/g, function (_match, optional) {
+    const key = keys[keyIndex++] && keys[keyIndex - 1].name;
+    const suffix = optional ? '?' : '';
+    return typeof key === 'string' ? `/:${key}${suffix}` : `/:param${suffix}`;
+  });
+
+  path = path.replace(/\/\(\.\*\)(\?)?/g, function (_match, optional) {
+    keyIndex += 1;
+    return optional ? '/*?' : '/*';
+  });
+
+  return path || '/';
 }
 
 /**
@@ -82,20 +133,13 @@ function extractParamsFromPath(routePath) {
  */
 function layerToPath(layer, prefix) {
   if (layer.route) {
-    return prefix + layer.route.path;
+    return normalizeJoinedPath(prefix, layer.route.path);
   }
 
-  if (layer.regexp.fast_slash) return prefix + '/';
-  if (layer.regexp.fast_star)  return prefix + '*';
+  if (layer.regexp.fast_slash) return normalizeJoinedPath(prefix, '/');
+  if (layer.regexp.fast_star)  return normalizeJoinedPath(prefix, '*');
 
-  const src = layer.regexp.source;
-  const cleaned = src
-    .replace(/^\^\\\//, '')
-    .replace(/\\\/\?\(\?=\\\/\|\$\).*$/, '')
-    .replace(/\\\//g, '/')
-    .replace(/\(\?:\(\[\^\\\/\]\+\?\)\)/g, ':param');
-
-  return prefix + '/' + cleaned;
+  return normalizeJoinedPath(prefix, regexpToMountPath(layer));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

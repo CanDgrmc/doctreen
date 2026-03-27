@@ -97,6 +97,17 @@ const productSchema = s.object({
   createdAt: s.string(),
 });
 
+
+const router = express.Router();
+router.get('/ping', defineRoute<never, never, { message: string }>(
+  (_req, res) => res.json({ message: 'pong' }),
+  {
+    description: 'A simple health check endpoint that responds with "pong".',
+    response: s.object({ message: s.string() }),
+  }
+));
+app.use('/api', router);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Users resource
 //
@@ -469,6 +480,7 @@ const docsConfig: UserConfig = {
     products: { description: 'Browse and manage the product catalog.' },
     auth:     { description: 'Authentication, session management, and token refresh.' },
     admin:    { description: 'Administrative operations restricted to users with the admin role.' },
+    api:      { description: 'Utility endpoints for API health and diagnostics (excluded from docs).' },
   },
 
   exclude: [

@@ -48,7 +48,7 @@ function normalizeErrors(errors) {
  * @returns {string[]}
  */
 function extractParamsFromPath(routePath) {
-  const matches = routePath.match(/:([^/]+)/g);
+  const matches = routePath.match(/:([^/?]+)/g);
   return matches ? matches.map((p) => p.slice(1)) : [];
 }
 
