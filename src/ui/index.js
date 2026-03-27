@@ -453,73 +453,6 @@ function renderFlowSections(flows) {
       </div>
       <span class="group-count-badge">${flows.length} flow${flows.length !== 1 ? 's' : ''}</span>
     </div>
-    <div class="flow-creator-card" id="flow-creator-card">
-      <div class="flow-creator-header">
-        <div>
-          <h3 class="flow-creator-title">Flow Creator</h3>
-          <p class="flow-creator-desc">Select documented routes, configure steps, and export a reusable flow JSON draft.</p>
-        </div>
-        <span class="flow-info-badge">Builder</span>
-      </div>
-      <div class="flow-creator-grid">
-        <label class="flow-input-row">
-          <span class="flow-input-label">Flow name</span>
-          <input class="flow-input" id="creator-flow-name" placeholder="User onboarding" />
-        </label>
-        <label class="flow-input-row">
-          <span class="flow-input-label">Description</span>
-          <input class="flow-input" id="creator-flow-description" placeholder="Create, fetch, and verify a user." />
-        </label>
-        <label class="flow-input-row">
-          <span class="flow-input-label">baseUrl template</span>
-          <input class="flow-base-url" id="creator-flow-base-url" placeholder="{{env.baseUrl}}" />
-        </label>
-        <label class="flow-input-row">
-          <span class="flow-input-label">Environment JSON</span>
-          <textarea class="creator-step-textarea" id="creator-flow-env">{
-  "baseUrl": "http://localhost:3000"
-}</textarea>
-        </label>
-        <label class="flow-input-row creator-step-full">
-          <span class="flow-input-label">Inputs JSON</span>
-          <textarea class="creator-step-textarea" id="creator-flow-inputs">{
-  "email": { "type": "string", "required": true }
-}</textarea>
-        </label>
-      </div>
-      <div class="flow-creator-toolbar">
-        <select class="flow-route-select" id="creator-route-select">
-          <option value="">Select a documented route…</option>
-        </select>
-        <button class="creator-add-step-btn" id="creator-add-step-btn" type="button">Add route as step</button>
-        <button class="creator-export-btn" id="creator-export-btn" type="button">Export flow JSON</button>
-        <span class="creator-helper-status" id="creator-helper-status">Pick route steps, then insert <code>{{input.*}}</code>, <code>{{env.*}}</code>, or prior <code>{{vars.*}}</code> into the focused field.</span>
-      </div>
-      <div class="flow-creator-layout">
-        <div class="flow-creator-panel">
-          <div class="detail-col-title">Draft Steps</div>
-          <div class="creator-step-list" id="creator-step-list">
-            <div class="flow-empty-note">No steps yet. Pick a route and add it to the flow.</div>
-          </div>
-        </div>
-        <div class="flow-creator-panel">
-          <div class="detail-col-title">Generated JSON</div>
-          <pre class="flow-result is-active" id="creator-flow-json">{
-  "version": 1,
-  "name": "",
-  "description": "",
-  "baseUrl": "{{env.baseUrl}}",
-  "env": {
-    "baseUrl": "http://localhost:3000"
-  },
-  "inputs": {
-    "email": { "type": "string", "required": true }
-  },
-  "steps": []
-}</pre>
-        </div>
-      </div>
-    </div>
     <div class="flow-info-card is-collapsed" id="flow-info-card">
       <button class="flow-info-toggle" id="flow-info-toggle" type="button" aria-expanded="false">
         <span class="flow-info-header">
@@ -644,6 +577,79 @@ function renderFlowSections(flows) {
         </div>
       </div>
       <p class="flow-info-footnote">Store flow files in <code>doctreen-flows/*.json</code> or configure <code>flowsPath</code>. The same definition can be run here in the docs UI or headlessly with <code>doctreen-flow run ...</code>.</p>
+      </div>
+    </div>
+    <div class="flow-creator-card" id="flow-creator-card">
+      <div class="flow-creator-header">
+        <div>
+          <h3 class="flow-creator-title">Flow Creator</h3>
+          <p class="flow-creator-desc">Select documented routes, configure steps, and export a reusable flow JSON draft.</p>
+        </div>
+        <span class="flow-info-badge">Builder</span>
+      </div>
+      <div class="flow-creator-grid">
+        <label class="flow-input-row">
+          <span class="flow-input-label">Flow name</span>
+          <input class="flow-input" id="creator-flow-name" placeholder="User onboarding" />
+        </label>
+        <label class="flow-input-row">
+          <span class="flow-input-label">Description</span>
+          <input class="flow-input" id="creator-flow-description" placeholder="Create, fetch, and verify a user." />
+        </label>
+        <label class="flow-input-row">
+          <span class="flow-input-label">baseUrl template</span>
+          <input class="flow-base-url" id="creator-flow-base-url" placeholder="{{env.baseUrl}}" />
+        </label>
+        <label class="flow-input-row">
+          <span class="flow-input-label">Environment JSON</span>
+          <textarea class="creator-step-textarea" id="creator-flow-env">{
+  "baseUrl": "http://localhost:3000"
+}</textarea>
+        </label>
+        <label class="flow-input-row creator-step-full">
+          <span class="flow-input-label">Inputs JSON</span>
+          <textarea class="creator-step-textarea" id="creator-flow-inputs">{
+  "email": { "type": "string", "required": true }
+}</textarea>
+        </label>
+      </div>
+      <div class="flow-creator-toolbar">
+        <select class="flow-route-select" id="creator-route-select">
+          <option value="">Select a documented route…</option>
+        </select>
+        <button class="creator-add-step-btn" id="creator-add-step-btn" type="button">Add route as step</button>
+        <button class="creator-export-btn" id="creator-export-btn" type="button">Export flow JSON</button>
+        <span class="creator-helper-status" id="creator-helper-status">Pick route steps, then insert <code>{{input.*}}</code>, <code>{{env.*}}</code>, or prior <code>{{vars.*}}</code> into the focused field.</span>
+      </div>
+      <div class="flow-creator-layout">
+        <div class="flow-creator-panel">
+          <div class="detail-col-title">Draft Steps</div>
+          <div class="creator-step-list" id="creator-step-list">
+            <div class="flow-empty-note">No steps yet. Pick a route and add it to the flow.</div>
+          </div>
+        </div>
+        <div class="flow-creator-panel">
+          <div class="creator-json-header">
+            <div class="detail-col-title">Generated JSON</div>
+            <div class="creator-step-actions">
+              <button class="creator-copy-json-btn" id="creator-copy-json-btn" type="button">Copy JSON</button>
+              <button class="creator-copy-json-btn" id="creator-download-json-btn" type="button">Download JSON</button>
+            </div>
+          </div>
+          <pre class="flow-result is-active" id="creator-flow-json">{
+  "version": 1,
+  "name": "",
+  "description": "",
+  "baseUrl": "{{env.baseUrl}}",
+  "env": {
+    "baseUrl": "http://localhost:3000"
+  },
+  "inputs": {
+    "email": { "type": "string", "required": true }
+  },
+  "steps": []
+}</pre>
+        </div>
       </div>
     </div>
     <div class="flow-list">`;
@@ -1112,7 +1118,7 @@ function serveDocsUI(routes, config, options) {
       font-size: 0.8rem;
       outline: none;
     }
-    .creator-add-step-btn, .creator-export-btn, .creator-remove-step-btn {
+    .creator-add-step-btn, .creator-export-btn, .creator-remove-step-btn, .creator-toggle-step-btn, .creator-copy-json-btn {
       padding: 7px 12px;
       border-radius: 6px;
       border: 1px solid var(--border);
@@ -1124,6 +1130,8 @@ function serveDocsUI(routes, config, options) {
     .creator-add-step-btn:hover { border-color: rgba(72,187,120,0.5); color: #68d391; }
     .creator-export-btn:hover { border-color: rgba(99,179,237,0.5); color: #63b3ed; }
     .creator-remove-step-btn:hover { border-color: rgba(245,101,101,0.5); color: #fc8181; }
+    .creator-toggle-step-btn:hover { border-color: rgba(99,179,237,0.5); color: #93c5fd; }
+    .creator-copy-json-btn:hover { border-color: rgba(99,179,237,0.5); color: #93c5fd; }
     .creator-helper-status {
       font-size: 0.73rem;
       color: var(--text-muted);
@@ -1140,6 +1148,13 @@ function serveDocsUI(routes, config, options) {
       border-radius: 10px;
       padding: 12px;
       min-width: 0;
+    }
+    .creator-json-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
     }
     .creator-step-list {
       display: flex;
@@ -1158,6 +1173,12 @@ function serveDocsUI(routes, config, options) {
       gap: 8px;
       align-items: center;
       margin-bottom: 10px;
+    }
+    .creator-step-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
     }
     .creator-step-title {
       display: flex;
@@ -1190,6 +1211,12 @@ function serveDocsUI(routes, config, options) {
       outline: none;
       resize: vertical;
       font-family: 'SFMono-Regular', Consolas, monospace;
+    }
+    .creator-step-card.is-collapsed .creator-step-body {
+      display: none;
+    }
+    .creator-step-card.is-collapsed .creator-step-header {
+      margin-bottom: 0;
     }
     .creator-helper-block {
       display: grid;
@@ -2051,6 +2078,8 @@ function serveDocsUI(routes, config, options) {
   var creatorRouteSelect = document.getElementById('creator-route-select');
   var creatorAddStepBtn = document.getElementById('creator-add-step-btn');
   var creatorExportBtn = document.getElementById('creator-export-btn');
+  var creatorCopyJsonBtn = document.getElementById('creator-copy-json-btn');
+  var creatorDownloadJsonBtn = document.getElementById('creator-download-json-btn');
   var creatorStepList = document.getElementById('creator-step-list');
   var creatorFlowJson = document.getElementById('creator-flow-json');
   var creatorHelperStatus = document.getElementById('creator-helper-status');
@@ -2256,6 +2285,28 @@ function serveDocsUI(routes, config, options) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    });
+  }
+  if (creatorCopyJsonBtn) {
+    creatorCopyJsonBtn.addEventListener('click', function () {
+      var json = JSON.stringify(buildCreatorFlowObject(), null, 2);
+      copyTextValue(json);
+      setCreatorStatus('Copied generated flow JSON to the clipboard.');
+    });
+  }
+  if (creatorDownloadJsonBtn) {
+    creatorDownloadJsonBtn.addEventListener('click', function () {
+      var json = JSON.stringify(buildCreatorFlowObject(), null, 2);
+      var blob = new Blob([json], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = slugifyStepId(creatorState.name || 'flow') + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setCreatorStatus('Downloaded generated flow JSON.');
     });
   }
   populateCreatorRoutes();
@@ -2883,6 +2934,7 @@ function serveDocsUI(routes, config, options) {
     return {
       id: slugifyStepId(route.method + '-' + route.path) + '-' + (index + 1),
       name: route.method + ' ' + route.path,
+      _collapsed: false,
       request: {
         method: route.method,
         path: route.path,
@@ -2987,7 +3039,7 @@ function serveDocsUI(routes, config, options) {
         : '';
 
       return (
-        '<div class="creator-step-card" data-step-index="' + index + '">' +
+        '<div class="creator-step-card' + (step._collapsed ? ' is-collapsed' : '') + '" data-step-index="' + index + '">' +
         '<div class="creator-step-header">' +
         '<div class="creator-step-title">' +
         '<span class="creator-step-index">' + (index + 1) + '</span>' +
@@ -2995,8 +3047,12 @@ function serveDocsUI(routes, config, options) {
         '<span class="flow-step-name">' + escapeHtmlClient(step.name || step.id) + '</span>' +
         '<span class="flow-step-path-inline">' + escapeHtmlClient(step.request.path) + '</span>' +
         '</div>' +
+        '<div class="creator-step-actions">' +
+        '<button class="creator-toggle-step-btn" data-step-index="' + index + '" type="button">' + (step._collapsed ? 'Expand' : 'Collapse') + '</button>' +
         '<button class="creator-remove-step-btn" data-step-index="' + index + '" type="button">Remove</button>' +
         '</div>' +
+        '</div>' +
+        '<div class="creator-step-body">' +
         '<div class="creator-step-grid">' +
         '<label class="flow-input-row"><span class="flow-input-label">Step id</span><input class="flow-input creator-step-id" data-step-index="' + index + '" value="' + escapeHtmlClient(step.id) + '" /></label>' +
         '<label class="flow-input-row"><span class="flow-input-label">Step name</span><input class="flow-input creator-step-name" data-step-index="' + index + '" value="' + escapeHtmlClient(step.name || '') + '" /></label>' +
@@ -3008,6 +3064,7 @@ function serveDocsUI(routes, config, options) {
         '<label class="flow-input-row creator-step-full"><span class="flow-input-label">Body JSON</span><textarea class="creator-step-textarea creator-step-body" data-step-index="' + index + '">' + escapeHtmlClient(JSON.stringify(step.request.body || {}, null, 2)) + '</textarea></label>' +
         '<label class="flow-input-row creator-step-full"><span class="flow-input-label">Extract JSON</span><textarea class="creator-step-textarea creator-step-extract" data-step-index="' + index + '">' + escapeHtmlClient(JSON.stringify(step.extract || {}, null, 2)) + '</textarea></label>' +
         '<label class="flow-input-row creator-step-full"><span class="flow-input-label">Assert JSON</span><textarea class="creator-step-textarea creator-step-assert" data-step-index="' + index + '">' + escapeHtmlClient(JSON.stringify(step.assert || {}, null, 2)) + '</textarea></label>' +
+        '</div>' +
         '</div>' +
         '</div>'
       );
@@ -3073,6 +3130,19 @@ function serveDocsUI(routes, config, options) {
       }
 
       renderCreatorSteps();
+      return;
+    }
+
+    var toggleStepBtn = e.target.closest('.creator-toggle-step-btn');
+    if (toggleStepBtn) {
+      var toggleIndex = Number(toggleStepBtn.getAttribute('data-step-index'));
+      var toggleStep = creatorState.steps[toggleIndex];
+      var toggleCard = toggleStepBtn.closest('.creator-step-card');
+      if (!toggleStep || !toggleCard) return;
+
+      toggleStep._collapsed = !toggleStep._collapsed;
+      toggleCard.classList.toggle('is-collapsed', !!toggleStep._collapsed);
+      toggleStepBtn.textContent = toggleStep._collapsed ? 'Expand' : 'Collapse';
       return;
     }
 
