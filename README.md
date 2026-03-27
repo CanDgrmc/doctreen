@@ -159,7 +159,11 @@ Flows are first-class in the UI:
 
 - a top-level **Flows** tab keeps flows separate from crowded route docs
 - the Flows tab includes a built-in guide for writing flow JSON
+- the Flows tab includes a built-in flow creator for drafting new flow JSON from documented routes
 - each flow can collect runtime inputs and override `baseUrl`
+- the creator lets you insert `{{input.*}}`, `{{env.*}}`, and `{{vars.*}}` placeholders into step fields
+- prior response fields can be promoted into `extract` entries and reused as `{{vars.*}}`
+- route params can be mapped optionally through a simple param helper instead of editing paths by hand
 - results are shown in both a visual execution timeline and raw JSON
 - the same flow file can be reused for documentation, smoke tests, and CI
 
@@ -338,6 +342,12 @@ app.use(expressAdapter(app, {
 
 - Flow presets appear in their own **Flows** tab
 - The Flows tab includes a built-in information section with JSON examples and creation guidance
+- The Flows tab also includes a flow creator that can:
+  - add documented routes as draft steps
+  - edit flow-level `description`, `baseUrl`, `env`, and `inputs`
+  - insert `input`, `env`, and extracted `vars` placeholders into request fields
+  - capture values from earlier response schemas and automatically create matching `extract` rules
+  - optionally map route params to placeholders without rewriting the whole path manually
 - Each flow can collect runtime inputs, override `baseUrl`, and run via the docs server
 - Results are shown as both:
   - an execution timeline with step-by-step request/response cards
@@ -575,6 +585,10 @@ Errors appear in the **Response** column of each route's detail panel (colour-co
 - Loads request-flow presets from `flows` config or `flowsPath`
 - Uses a dedicated top-level **Flows** tab so flows stay separate from route documentation
 - Includes an information section with flow authoring guidance and JSON examples
+- Includes a built-in flow creator for assembling draft flows from documented routes
+- Lets you insert `input`, `env`, and existing `vars` placeholders into step fields
+- Can capture values from earlier response schemas and convert them into reusable `extract` rules
+- Supports optional route-param mapping helpers for `:id`-style params
 - Runs named flows directly inside the docs UI
 - Collects runtime inputs and supports per-run `baseUrl` overrides
 - Shows flow execution results as:
