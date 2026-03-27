@@ -4,8 +4,8 @@ Auto-generate and serve interactive API documentation and reusable request flows
 
 DocTreen introspects your Express, Fastify, Hono, or Koa app at runtime, parses your JSDoc comments, loads request-flow presets, and serves a fully interactive documentation UI at `/docs`.
 
-![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/doctreen-img.png)
-
+![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/ss-1.png)
+![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/ss-2.png)
 ---
 
 ## Installation
