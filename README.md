@@ -1,8 +1,8 @@
 # DocTreen
 
-Auto-generate and serve interactive API documentation and reusable request flows for your Node.js backend — zero configuration, zero runtime dependencies.
+Auto-generate and serve interactive API documentation and reusable request flows for Express, Fastify, Hono, and Koa backends.
 
-DocTreen introspects your Express, Fastify, Hono, or Koa app at runtime, parses your JSDoc comments, loads request-flow presets, and serves a fully interactive documentation UI at `/docs`.
+DocTreen introspects your app at runtime, can read inline JSDoc comments from handlers, loads request-flow presets, and serves an interactive documentation UI at the configured `docsPath`.
 
 ![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/ss-1.png)
 ![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/ss-2.png)
@@ -381,17 +381,16 @@ Supported CLI flags:
 
 ## Documenting Routes with JSDoc
 
-DocTreen parses JSDoc comments on your route handler functions. Supported tags:
+DocTreen reads JSDoc from the handler function source. In practice, that means the JSDoc block should be placed inside the handler, at the top of the function body. Supported tags:
 
 | Tag | Description | Example |
 |---|---|---|
 | `@description` | Route description | `@description Get all users` |
-| `@param {type} name` | Query or path parameter | `@param {string} search` |
-| `@body {type} name` | Request body field | `@body {string} email` |
+| `@param {type} body.name` | Request body field | `@param {string} body.email` |
+| `@param {type} query.name` | Query parameter | `@param {string} query.search` |
 | `@response {type} name` | Response field | `@response {string} id` |
 | `@returns {Type}` | Full response type (schema ref) | `@returns {User}` |
-| `@deprecated` | Mark route as deprecated | `@deprecated` |
-| `@group GroupName` | Override group assignment | `@group Admin` |
+| `@header Name - value` | Request header | `@header Authorization - Bearer <token>` |
 
 ### Optional Fields
 
@@ -399,9 +398,9 @@ Wrap a field name in `[brackets]` to mark it as optional:
 
 ```js
 /**
- * @body {string} name
- * @body {string} [bio]       — optional
- * @body {number} [age]       — optional
+ * @param {string} body.name
+ * @param {string} [body.bio]       optional
+ * @param {number} [body.age]       optional
  */
 app.post('/users', handler);
 ```
@@ -409,15 +408,18 @@ app.post('/users', handler);
 ### Example
 
 ```js
-/**
- * @description Get a user by ID
- * @param {string} id - User ID
- * @returns {User}
- */
-app.get('/users/:id', (req, res) => {
+app.get('/users/:id', function (req, res) {
+  /**
+   * @description Get a user by ID
+   * @response {string} id
+   * @returns {User}
+   */
   // ...
+  res.json({ id: req.params.id });
 });
 ```
+
+Use `@param {type} query.name` for query fields and `@param {type} body.name` for body fields. Path params are still discovered from the route path itself. If you prefer comments above the route declaration or need stricter control, use `defineRoute(...)` instead of relying on JSDoc parsing.
 
 ---
 
@@ -600,7 +602,7 @@ Errors appear in the **Response** column of each route's detail panel (colour-co
 
 ## TypeScript
 
-DocTreen ships declaration files alongside the JavaScript — no build step, no `@types/express` required.
+DocTreen ships declaration files alongside the JavaScript. You do not need a separate `@types/doctreen` package.
 
 ### Quick Start (TypeScript)
 
@@ -695,7 +697,7 @@ import type { RouteSchemas, HonoLike }      from 'doctreen/hono';
 import type { RouteSchemas, KoaRouterLike } from 'doctreen/koa';
 ```
 
-`ExpressLike`, `FastifyLike`, `HonoLike`, and `KoaRouterLike` are structural interfaces — framework `@types/*` packages are optional.
+`ExpressLike`, `FastifyLike`, `HonoLike`, and `KoaRouterLike` are structural interfaces exposed by DocTreen. You may still need your framework's own type packages depending on how your application is typed.
 
 ---
 
@@ -722,7 +724,7 @@ import type { RouteSchemas, KoaRouterLike } from 'doctreen/koa';
 3. Can be called **before or after** your routes (lazy read at request time)
 4. Schema resolution order: `defineRoute` → JSDoc block comment
 5. If flows are configured, `POST <docsPath>/__flows/run` executes them through the shared runner
-6. Works on any runtime: Node.js (via `@hono/node-server`), Bun, Deno, Cloudflare Workers
+6. The adapter reads Hono route metadata lazily and works with Hono apps; the included example uses Node.js via `@hono/node-server`
 
 ### Koa
 1. `koaAdapter(router, config)` adds a GET route at `docsPath` to the `@koa/router` instance
