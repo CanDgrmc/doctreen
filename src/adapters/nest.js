@@ -1,0 +1,428 @@
+'use strict';
+
+// ─── Imports ──────────────────────────────────────────────────────────────────
+
+const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = require('../index');
+const { serveDocsUI } = require('../ui/index');
+const { zodToSchemaNode, isZodSchema } = require('./zod');
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+// Metadata key used by @DocRoute and the smaller decorator family.
+// Matches what NestJS itself uses for its own keys (plain strings) so that
+// reflect-metadata (already required by NestJS) is the only polyfill needed.
+const DOC_ROUTE_METADATA = 'doctreen:route';
+
+// NestJS RequestMethod enum — mirrored here to avoid importing @nestjs/common.
+const REQUEST_METHOD_MAP = {
+  0: 'GET',
+  1: 'POST',
+  2: 'PUT',
+  3: 'DELETE',
+  4: 'PATCH',
+  5: 'ALL',
+  6: 'OPTIONS',
+  7: 'HEAD',
+  8: 'SEARCH',
+};
+
+// Methods that carry no body and are not worth documenting in the UI.
+const SKIP_METHODS = new Set([5, 6, 7]); // ALL, OPTIONS, HEAD
+
+// ─── Path helpers ─────────────────────────────────────────────────────────────
+
+function normalizeSegment(p) {
+  if (!p || p === '/') return '';
+  return p.startsWith('/') ? p : '/' + p;
+}
+
+function joinPaths() {
+  const parts = Array.prototype.slice.call(arguments);
+  const joined = parts
+    .filter(Boolean)
+    .map(normalizeSegment)
+    .join('')
+    .replace(/\/+/g, '/');
+  return joined || '/';
+}
+
+function extractParamsFromPath(path) {
+  const params = [];
+  const re = /:([a-zA-Z_][a-zA-Z0-9_]*)/g;
+  let m;
+  while ((m = re.exec(path)) !== null) params.push(m[1]);
+  return params;
+}
+
+// ─── Schema coercion ──────────────────────────────────────────────────────────
+
+/**
+ * Accepts a SchemaNode (from the `s` builder), a Zod schema, or null/undefined.
+ * Returns a SchemaNode or null.
+ *
+ * @param {any} schema
+ * @returns {import('../index').SchemaNode|null}
+ */
+function convertSchema(schema) {
+  if (!schema) return null;
+  if (isZodSchema(schema)) return zodToSchemaNode(schema);
+  if (typeof schema === 'object' && typeof schema.type === 'string') return schema;
+  return null;
+}
+
+// ─── Route seeding ────────────────────────────────────────────────────────────
+
+/**
+ * Applies a DocRoute schema bag to a mutable RouteEntry.
+ *
+ * @param {import('../index').RouteEntry} entry
+ * @param {NestRouteSchemas} docSchema
+ */
+function seedEntryFromSchema(entry, docSchema) {
+  if (!docSchema) return;
+
+  if (docSchema.description) entry.description = docSchema.description;
+  if (docSchema.headers) entry.requestHeaders = docSchema.headers;
+
+  if (docSchema.request) {
+    entry.requestSchema = {
+      body: convertSchema(docSchema.request.body) || null,
+      query: convertSchema(docSchema.request.query) || null,
+    };
+  }
+
+  if (docSchema.response != null) {
+    entry.responseSchema = convertSchema(docSchema.response);
+  }
+
+  if (docSchema.errors) {
+    entry.errors = Object.keys(docSchema.errors).map(function (statusStr) {
+      const val = docSchema.errors[statusStr];
+      return {
+        status: parseInt(statusStr, 10),
+        description: typeof val === 'string' ? val : (val && val.description) || null,
+        schema: typeof val === 'object' && val && val.schema ? convertSchema(val.schema) : null,
+      };
+    });
+  }
+}
+
+// ─── Route discovery ──────────────────────────────────────────────────────────
+
+/**
+ * Walks the NestJS internal container to build a RouteRegistry.
+ *
+ * Discovery strategy:
+ *  1. Read the global prefix via `app.getGlobalPrefix()` (NestJS ≥ 7).
+ *  2. Iterate `app.container.getModules()` — each Module holds a `controllers` Map.
+ *  3. For each controller metatype, read `@Controller` path metadata.
+ *  4. Scan prototype methods; read `@Get` / `@Post` etc. path + method metadata.
+ *  5. Read `@DocRoute` (or individual decorator) metadata from the method.
+ *  6. Register the route and apply the doc schema.
+ *
+ * @param {any} app  - INestApplication instance
+ * @param {import('../index').NormalizedConfig} config
+ * @returns {import('../index').RouteEntry[]}
+ */
+function discoverRoutes(app, config) {
+  const registry = new RouteRegistry();
+
+  let container;
+  try {
+    container = app.container;
+  } catch (_) {
+    return registry.getAll();
+  }
+
+  if (!container || typeof container.getModules !== 'function') {
+    return registry.getAll();
+  }
+
+  const globalPrefix = normalizeSegment(
+    typeof app.getGlobalPrefix === 'function' ? app.getGlobalPrefix() : ''
+  );
+
+  const modules = Array.from(container.getModules().values());
+
+  for (let mi = 0; mi < modules.length; mi++) {
+    const nestModule = modules[mi];
+    const controllers = nestModule.controllers;
+    if (!controllers || typeof controllers.forEach !== 'function') continue;
+
+    controllers.forEach(function (wrapper) {
+      const metatype = wrapper.metatype;
+      if (!metatype || !metatype.prototype) return;
+
+      // Controller-level path prefix — @Controller('users') or @Controller()
+      const rawCtrlPath = Reflect.getMetadata('path', metatype);
+      const ctrlPaths = Array.isArray(rawCtrlPath)
+        ? rawCtrlPath
+        : [rawCtrlPath != null ? rawCtrlPath : ''];
+
+      const prototype = metatype.prototype;
+      const methodNames = Object.getOwnPropertyNames(prototype);
+
+      for (let i = 0; i < methodNames.length; i++) {
+        const methodName = methodNames[i];
+        if (methodName === 'constructor') continue;
+
+        const handler = prototype[methodName];
+        if (typeof handler !== 'function') continue;
+
+        // NestJS sets these via @Get(), @Post(), etc.
+        const rawRoutePath = Reflect.getMetadata('path', handler);
+        const routeMethod = Reflect.getMetadata('method', handler);
+
+        if (rawRoutePath === undefined || routeMethod === undefined) continue;
+        if (SKIP_METHODS.has(routeMethod)) continue;
+
+        const httpMethod = REQUEST_METHOD_MAP[routeMethod];
+        if (!httpMethod) continue;
+
+        const routePaths = Array.isArray(rawRoutePath) ? rawRoutePath : [rawRoutePath || ''];
+        const docSchema = Reflect.getMetadata(DOC_ROUTE_METADATA, handler);
+
+        for (let ci = 0; ci < ctrlPaths.length; ci++) {
+          for (let ri = 0; ri < routePaths.length; ri++) {
+            const fullPath = joinPaths(globalPrefix, ctrlPaths[ci], routePaths[ri]);
+
+            if (shouldExclude(fullPath, config.exclude)) continue;
+
+            const entry = registry.add({
+              method: httpMethod,
+              path: fullPath,
+              params: extractParamsFromPath(fullPath),
+            });
+
+            seedEntryFromSchema(entry, docSchema);
+          }
+        }
+      }
+    });
+  }
+
+  return registry.getAll();
+}
+
+// ─── Decorators ───────────────────────────────────────────────────────────────
+
+/**
+ * Method decorator — attach a full documentation schema to a NestJS controller method.
+ *
+ * @example
+ * ```ts
+ * @Post('import')
+ * @DocRoute({
+ *   description: 'Bulk import partner inventory',
+ *   headers: { 'x-api-key': 'Partner API key' },
+ *   request: { body: importSchema },
+ *   response: importResponseSchema,
+ *   errors: { 400: 'Validation failed', 401: 'Unauthorised' },
+ * })
+ * importProducts(@Body() body: ImportDto) { ... }
+ * ```
+ *
+ * @param {NestRouteSchemas} schemas
+ * @returns {MethodDecorator}
+ */
+function DocRoute(schemas) {
+  return function (target, key, descriptor) {
+    Reflect.defineMetadata(DOC_ROUTE_METADATA, schemas, descriptor.value);
+    return descriptor;
+  };
+}
+
+/**
+ * Attach a description string to a controller method.
+ * Merges with any existing `@DocRoute` metadata on the same method.
+ *
+ * @param {string} description
+ * @returns {MethodDecorator}
+ */
+function DocDescription(description) {
+  return function (target, key, descriptor) {
+    const existing = Reflect.getMetadata(DOC_ROUTE_METADATA, descriptor.value) || {};
+    Reflect.defineMetadata(
+      DOC_ROUTE_METADATA,
+      Object.assign({}, existing, { description: description }),
+      descriptor.value
+    );
+    return descriptor;
+  };
+}
+
+/**
+ * Attach documented request headers.
+ * Merges with any existing `@DocRoute` metadata on the same method.
+ *
+ * @param {Record<string,string>} headers
+ * @returns {MethodDecorator}
+ */
+function DocHeaders(headers) {
+  return function (target, key, descriptor) {
+    const existing = Reflect.getMetadata(DOC_ROUTE_METADATA, descriptor.value) || {};
+    Reflect.defineMetadata(
+      DOC_ROUTE_METADATA,
+      Object.assign({}, existing, { headers: headers }),
+      descriptor.value
+    );
+    return descriptor;
+  };
+}
+
+/**
+ * Attach request body/query schemas.
+ * Accepts SchemaNode objects (from `s` builder) or Zod schemas.
+ * Merges with any existing `@DocRoute` metadata on the same method.
+ *
+ * @param {{ body?: any, query?: any }} request
+ * @returns {MethodDecorator}
+ */
+function DocRequest(request) {
+  return function (target, key, descriptor) {
+    const existing = Reflect.getMetadata(DOC_ROUTE_METADATA, descriptor.value) || {};
+    Reflect.defineMetadata(
+      DOC_ROUTE_METADATA,
+      Object.assign({}, existing, { request: request }),
+      descriptor.value
+    );
+    return descriptor;
+  };
+}
+
+/**
+ * Attach a response schema.
+ * Accepts a SchemaNode object or a Zod schema.
+ * Merges with any existing `@DocRoute` metadata on the same method.
+ *
+ * @param {any} response
+ * @returns {MethodDecorator}
+ */
+function DocResponse(response) {
+  return function (target, key, descriptor) {
+    const existing = Reflect.getMetadata(DOC_ROUTE_METADATA, descriptor.value) || {};
+    Reflect.defineMetadata(
+      DOC_ROUTE_METADATA,
+      Object.assign({}, existing, { response: response }),
+      descriptor.value
+    );
+    return descriptor;
+  };
+}
+
+/**
+ * Attach documented error responses.
+ * Merges with any existing `@DocRoute` metadata on the same method.
+ *
+ * @param {Record<number, string|{ description?: string, schema?: any }>} errors
+ * @returns {MethodDecorator}
+ */
+function DocErrors(errors) {
+  return function (target, key, descriptor) {
+    const existing = Reflect.getMetadata(DOC_ROUTE_METADATA, descriptor.value) || {};
+    Reflect.defineMetadata(
+      DOC_ROUTE_METADATA,
+      Object.assign({}, existing, { errors: errors }),
+      descriptor.value
+    );
+    return descriptor;
+  };
+}
+
+// ─── Adapter ──────────────────────────────────────────────────────────────────
+
+/**
+ * Sets up doctreen documentation for a NestJS application.
+ *
+ * Call this **after** `NestFactory.create()` and **before** `app.listen()`.
+ * Works with both `@nestjs/platform-express` (default) and
+ * `@nestjs/platform-fastify`.
+ *
+ * Route discovery reads NestJS internal metadata — no extra module imports,
+ * no `DiscoveryModule`, no modifications to your AppModule required.
+ *
+ * Schema resolution order per route (first wins):
+ *  1. `@DocRoute` / `@DocDescription` / `@DocRequest` / … decorators
+ *  2. No further fallback (JSDoc and runtime inference are Express-only features)
+ *
+ * @example
+ * ```ts
+ * import { NestFactory } from '@nestjs/core';
+ * import { nestAdapter } from 'doctreen/nest';
+ * import { AppModule } from './app.module';
+ *
+ * async function bootstrap() {
+ *   const app = await NestFactory.create(AppModule);
+ *   nestAdapter(app, { meta: { title: 'My API', version: '2.0.0' } });
+ *   await app.listen(3000);
+ * }
+ * bootstrap();
+ * ```
+ *
+ * @param {any} app - INestApplication instance returned by NestFactory.create()
+ * @param {import('../index').UserConfig} [userConfig]
+ */
+function nestAdapter(app, userConfig) {
+  const config = normalizeConfig(userConfig);
+  if (!config.enabled) return;
+
+  let cachedRoutes = null;
+
+  function getRoutes() {
+    if (cachedRoutes === null || config.liveReload) {
+      cachedRoutes = discoverRoutes(app, config);
+    }
+    return cachedRoutes;
+  }
+
+  const httpAdapter = app.getHttpAdapter();
+  const adapterName = (httpAdapter.constructor && httpAdapter.constructor.name) || '';
+  const isFastify = adapterName.toLowerCase().includes('fastify');
+
+  if (isFastify) {
+    httpAdapter.get(config.docsPath, function (req, reply) {
+      const html = serveDocsUI(getRoutes(), config);
+      reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+    });
+  } else {
+    // Express (default platform) and any other adapter that uses Node's
+    // IncomingMessage / ServerResponse signature.
+    httpAdapter.get(config.docsPath, function (req, res) {
+      const html = serveDocsUI(getRoutes(), config);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.send(html);
+    });
+  }
+}
+
+// ─── defineRoute (compatibility shim) ────────────────────────────────────────
+
+/**
+ * Attaches a schema bag to a plain handler function via `__docLibSchema`.
+ *
+ * In NestJS, prefer `@DocRoute` instead — this shim exists so that code shared
+ * with other doctreen adapters can be reused unchanged.
+ *
+ * @param {Function} handler
+ * @param {any} [schemas]
+ * @returns {Function}
+ */
+function defineRoute(handler, schemas) {
+  if (handler) handler.__docLibSchema = schemas || {};
+  return handler;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+module.exports = {
+  nestAdapter,
+  DocRoute,
+  DocDescription,
+  DocHeaders,
+  DocRequest,
+  DocResponse,
+  DocErrors,
+  defineRoute,
+  defineSchema,
+  s,
+};

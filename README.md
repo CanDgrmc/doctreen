@@ -1,17 +1,50 @@
 # DocTreen
 
-Auto-generate and serve interactive API documentation and reusable request flows for Express, Fastify, Hono, and Koa backends.
+Auto-generate and serve interactive API documentation for Express, Fastify, Hono, Koa, and NestJS backends — with zero runtime dependencies and first-class Zod support.
 
-DocTreen introspects your app at runtime, can read inline JSDoc comments from handlers, loads request-flow presets, and serves an interactive documentation UI at the configured `docsPath`.
+DocTreen introspects your app at startup or first request, reads inline JSDoc or decorator metadata, and serves a self-contained interactive docs UI at the configured `docsPath`. It also ships a request-flow engine for building and running multi-step API sequences directly inside the UI.
 
 ![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/ss-1.png)
 ![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/ss-2.png)
+
+---
+
+## Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [NestJS — Decorator API](#nestjs--decorator-api)
+- [Zod Support](#zod-support)
+- [Request Flows](#request-flows)
+- [Documenting Routes with JSDoc](#documenting-routes-with-jsdoc)
+- [Schema Builder](#schema-builder)
+- [Named Schemas](#named-schemas)
+- [Explicit Route Definition with `defineRoute`](#explicit-route-definition-with-defineroute)
+- [Error Responses](#error-responses)
+- [UI Features](#ui-features)
+- [TypeScript](#typescript)
+- [How It Works](#how-it-works)
+- [Example Apps](#example-apps)
+
 ---
 
 ## Installation
 
 ```bash
 npm install doctreen
+```
+
+For **NestJS** projects, also install the peer dependencies (if not already present):
+
+```bash
+npm install reflect-metadata rxjs
+```
+
+For **Zod** schema support:
+
+```bash
+npm install zod
 ```
 
 ---
@@ -27,14 +60,15 @@ const { expressAdapter } = require('doctreen/express');
 const app = express();
 app.use(express.json());
 
-// Define routes first, then mount the docs middleware
 app.get('/users', (req, res) => res.json([]));
+app.post('/users', (req, res) => res.status(201).json({ id: 1 }));
 
+// Mount after your routes
 app.use(expressAdapter(app, {
   meta: { title: 'My API', version: '1.0.0' },
 }));
 
-app.listen(3000, () => console.log('API docs at http://localhost:3000/docs'));
+app.listen(3000, () => console.log('Docs at http://localhost:3000/docs'));
 ```
 
 ### Fastify
@@ -45,19 +79,18 @@ const { fastifyAdapter } = require('doctreen/fastify');
 
 // Call BEFORE registering routes — uses the onRoute hook
 fastifyAdapter(fastify, {
-  docsPath: '/api/docs',
   meta: { title: 'My API', version: '1.0.0' },
 });
 
 fastify.get('/users', async (req, reply) => reply.send([]));
 
-fastify.listen({ port: 3000 }, () => console.log('API docs at http://localhost:3000/api/docs'));
+fastify.listen({ port: 3000 });
 ```
 
 ### Hono
 
 ```js
-// hono-app.js — run with: npx tsx hono-app.js  (Hono v4 is ESM-only)
+// Hono v4 is ESM-only — run with: npx tsx hono-app.js
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { honoAdapter } from 'doctreen/hono';
@@ -66,16 +99,11 @@ const app = new Hono();
 
 app.get('/users', (c) => c.json([]));
 
-// Can be called before or after routes — reads lazily at first request
-honoAdapter(app, {
-  docsPath: '/api/docs',
-  meta: { title: 'My API', version: '1.0.0' },
-});
+// Can be called before or after routes
+honoAdapter(app, { meta: { title: 'My API', version: '1.0.0' } });
 
 serve({ fetch: app.fetch, port: 3000 });
 ```
-
-> **Note**: Hono v4 is ESM-only. Run `.js` files with `npx tsx` or use `.ts` files directly.
 
 ### Koa
 
@@ -89,93 +117,303 @@ const router = new Router();
 
 router.get('/users', (ctx) => { ctx.body = []; });
 
-// Can be called before or after routes — reads lazily at first request
-koaAdapter(router, {
-  docsPath: '/api/docs',
-  meta: { title: 'My API', version: '1.0.0' },
-});
+// Can be called before or after routes
+koaAdapter(router, { meta: { title: 'My API', version: '1.0.0' } });
 
 app.use(router.routes());
 app.use(router.allowedMethods());
-app.listen(3000, () => console.log('API docs at http://localhost:3000/api/docs'));
+app.listen(3000);
 ```
 
-Visit the configured `docsPath` to see your documentation.
+### NestJS
+
+```ts
+import 'reflect-metadata';
+import { NestFactory } from '@nestjs/core';
+import { nestAdapter } from 'doctreen/nest';
+import { AppModule } from './app.module';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  // Call after NestFactory.create(), before app.listen()
+  nestAdapter(app, {
+    meta: { title: 'My API', version: '1.0.0' },
+  });
+
+  await app.listen(3000);
+  console.log('Docs at http://localhost:3000/docs');
+}
+bootstrap();
+```
+
+Then annotate your controller methods with `@DocRoute` (see [NestJS — Decorator API](#nestjs--decorator-api)).
+
+Visit the configured `docsPath` (default: `/docs`) to see your documentation.
 
 ---
 
 ## Configuration
 
-The same config object is accepted by `expressAdapter`, `fastifyAdapter`, `honoAdapter`, and `koaAdapter`:
+All adapters accept the same config object:
 
 ```js
-// Express
-app.use(expressAdapter(app, {
-  docsPath: '/docs',
-  enabled: true,
-  liveReload: false,
-  flowsPath: './doctreen-flows',
-  exclude: ['/health'],
-  groups: {
-    Users: ['/users', '/users/:id'],
-    Products: '/products',
-  },
+{
+  docsPath:  '/docs',          // URL where the docs UI is served
+  enabled:   true,             // Set false to disable; defaults to NODE_ENV !== 'production'
+  liveReload: false,           // Re-discover routes on every docs hit
   meta: {
-    title: 'My API',
-    version: '1.0.0',
+    title:       'My API',
+    version:     '1.0.0',
     description: 'Full description shown in the UI header',
   },
-}));
-
-// Fastify (same options)
-fastifyAdapter(fastify, {
-  docsPath: '/api/docs',
-  meta: { title: 'My API', version: '1.0.0' },
-});
+  exclude:   ['/health', /^\/internal\/.*/],  // Paths to hide from docs
+  groups: {                    // Group routes under named sections in the sidebar
+    Users:    ['/users', '/users/:id'],
+    Products: '/products',
+  },
+  flows:     [...],            // Inline flow presets (see Request Flows)
+  flowsPath: './doctreen-flows',  // Directory of *.json flow files
+}
 ```
 
-### Config Options
+### Config Reference
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `docsPath` | `string` | `'/docs'` | URL path where the docs UI is served |
-| `enabled` | `boolean` | `NODE_ENV !== 'production'` | Disable to hide docs entirely |
-| `liveReload` | `boolean` | `false` | Re-introspect routes on every docs hit |
-| `flows` | `FlowDefinition[]` | `null` | Flow presets embedded directly into the docs UI |
-| `flowsPath` | `string` | `'./doctreen-flows'` if present | Directory of `*.json` flow presets to load into the docs UI |
-| `exclude` | `string \| RegExp \| Array` | `[]` | Routes to exclude from docs |
-| `groups` | `Record<string, string \| string[]>` | `{}` | Group routes into named sections |
-| `meta.title` | `string` | `'API Documentation'` | Title shown in the UI |
-| `meta.version` | `string` | — | API version label |
-| `meta.description` | `string` | — | Description shown below the title |
+| `docsPath` | `string` | `'/docs'` | URL where the docs UI is served |
+| `enabled` | `boolean` | `NODE_ENV !== 'production'` | Set to `false` to disable docs entirely |
+| `liveReload` | `boolean` | `false` | Re-discover routes on every docs request |
+| `meta.title` | `string` | `'API Documentation'` | Title shown in the UI header |
+| `meta.version` | `string` | `'1.0.0'` | Version label |
+| `meta.description` | `string` | `''` | Description shown below the title |
+| `exclude` | `string \| RegExp \| Array` | `[]` | Routes to hide from the docs |
+| `groups` | `Record<string, string \| string[]>` | `{}` | Group routes into named sidebar sections |
+| `flows` | `FlowDefinition[]` | `null` | Inline request-flow presets |
+| `flowsPath` | `string` | auto-detected | Directory of `*.json` flow files |
+
+---
+
+## NestJS — Decorator API
+
+DocTreen provides a decorator-based API for NestJS that integrates naturally with standard NestJS controller patterns.
+
+### Setup
+
+```ts
+// main.ts
+import 'reflect-metadata';
+import { NestFactory } from '@nestjs/core';
+import { nestAdapter } from 'doctreen/nest';
+import { AppModule } from './app.module';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  nestAdapter(app, { meta: { title: 'My API', version: '2.0.0' } });
+  await app.listen(3000);
+}
+bootstrap();
+```
+
+No changes to `AppModule` are required. DocTreen reads NestJS's internal route metadata directly — no `DiscoveryModule` import needed.
+
+Works with both **`@nestjs/platform-express`** (default) and **`@nestjs/platform-fastify`**.
+
+### `@DocRoute` — Full schema on one decorator
+
+```ts
+import { Controller, Post, Body } from '@nestjs/common';
+import { DocRoute } from 'doctreen/nest';
+import { z } from 'zod';
+
+const importSchema = z.object({
+  products: z.array(z.object({ sku: z.string(), price: z.number() })),
+});
+
+const importResponseSchema = z.object({
+  imported: z.number(),
+  skipped:  z.number(),
+});
+
+@Controller('products')
+export class ProductsController {
+  @Post('import')
+  @DocRoute({
+    description: 'Bulk import partner inventory',
+    headers: {
+      'x-partner-api-key': 'Partner API key',
+      'Content-Type':      'application/json',
+    },
+    request: {
+      body: importSchema,
+    },
+    response: importResponseSchema,
+    errors: {
+      400: 'Validation failed',
+      401: 'Missing or invalid API key',
+      429: 'Rate limit exceeded',
+    },
+  })
+  importProducts(@Body() body: any) {
+    return { imported: body.products.length, skipped: 0 };
+  }
+}
+```
+
+### Granular decorators
+
+Use the smaller decorators when you want to keep each concern separate, or when composing with other decorator libraries:
+
+```ts
+import { Controller, Get, Post, Delete, Param, Body } from '@nestjs/common';
+import {
+  DocDescription,
+  DocHeaders,
+  DocRequest,
+  DocResponse,
+  DocErrors,
+} from 'doctreen/nest';
+import { z } from 'zod';
+
+const UserSchema = z.object({ id: z.number(), name: z.string(), email: z.string() });
+
+@Controller('users')
+export class UsersController {
+  @Get()
+  @DocDescription('List all users')
+  @DocRequest({ query: z.object({ page: z.number().optional(), role: z.string().optional() }) })
+  @DocResponse(z.array(UserSchema))
+  getUsers() { return []; }
+
+  @Post()
+  @DocDescription('Create a new user')
+  @DocHeaders({ Authorization: 'Bearer <token>' })
+  @DocRequest({ body: z.object({ name: z.string(), email: z.string() }) })
+  @DocResponse(UserSchema)
+  @DocErrors({ 409: 'Email already in use', 422: 'Validation failed' })
+  createUser(@Body() body: any) { return { id: 1, ...body }; }
+
+  @Delete(':id')
+  @DocDescription('Delete a user by ID')
+  @DocErrors({ 404: 'User not found', 403: 'Insufficient permissions' })
+  deleteUser(@Param('id') id: string) { return { success: true }; }
+}
+```
+
+All `@Doc*` decorators merge onto the same metadata key — stack any combination on the same method.
+
+### `@DocRoute` schema reference
+
+| Field | Type | Description |
+|---|---|---|
+| `description` | `string` | Human-readable description shown in the UI |
+| `headers` | `Record<string, string>` | Request headers to document |
+| `request.body` | `SchemaNode \| ZodSchema` | Request body shape |
+| `request.query` | `SchemaNode \| ZodSchema` | Query parameter shape |
+| `response` | `SchemaNode \| ZodSchema` | Success response shape |
+| `errors` | `Record<number, string \| { description?, schema? }>` | Error responses by HTTP status |
+
+---
+
+## Zod Support
+
+DocTreen includes a standalone Zod → SchemaNode converter available as `doctreen/zod`. It is used automatically inside the NestJS adapter whenever a Zod schema is passed to `@DocRoute` or any `@Doc*` decorator.
+
+### `zodToSchemaNode`
+
+```ts
+import { z } from 'zod';
+import { zodToSchemaNode } from 'doctreen/zod';
+
+const schema = z.object({
+  id:    z.number(),
+  name:  z.string(),
+  email: z.string().email(),
+  role:  z.enum(['admin', 'user']).optional(),
+  tags:  z.array(z.string()),
+});
+
+const node = zodToSchemaNode(schema);
+// {
+//   type: 'object',
+//   properties: {
+//     id:    { type: 'number' },
+//     name:  { type: 'string' },
+//     email: { type: 'string' },
+//     role:  { type: 'string', optional: true },
+//     tags:  { type: 'array', items: { type: 'string' } },
+//   }
+// }
+```
+
+### Supported Zod types
+
+| Zod type | SchemaNode output |
+|---|---|
+| `z.string()`, `z.date()` | `{ type: 'string' }` |
+| `z.number()`, `z.bigint()` | `{ type: 'number' }` |
+| `z.boolean()` | `{ type: 'boolean' }` |
+| `z.null()`, `z.undefined()`, `z.void()` | `{ type: 'null' }` |
+| `z.any()`, `z.unknown()` | `{ type: 'unknown' }` |
+| `z.object({...})` | `{ type: 'object', properties: {...} }` |
+| `z.array(T)` | `{ type: 'array', items: T }` |
+| `z.tuple([T, ...])` | `{ type: 'array', items: T[0] }` |
+| `z.record(V)` | `{ type: 'object', properties: {} }` |
+| `z.optional(T)` | `{ ...T, optional: true }` |
+| `z.nullable(T)` | `{ ...T, optional: true }` |
+| `z.default(T)` | unwraps to `T` |
+| `z.enum([...])` | `{ type: 'string' }` |
+| `z.nativeEnum(E)` | `{ type: 'string' }` or `{ type: 'number' }` |
+| `z.literal(v)` | `{ type: typeof v }` |
+| `z.union([A, B])` | first option |
+| `z.discriminatedUnion(...)` | first option |
+| `z.intersection(A, B)` | merged `object` properties |
+| `z.lazy(...)` | resolved recursively |
+| `.transform()`, `.pipe()` | unwraps to input schema |
+
+### Using `zodToSchemaNode` with other adapters
+
+While the NestJS adapter handles Zod conversion automatically, you can use `zodToSchemaNode` with any adapter via `defineRoute`:
+
+```js
+const { defineRoute } = require('doctreen/express');
+const { zodToSchemaNode } = require('doctreen/zod');
+const { z } = require('zod');
+
+const CreateUserSchema = z.object({ name: z.string(), email: z.string() });
+
+app.post('/users', defineRoute(
+  (req, res) => res.status(201).json({ id: 1 }),
+  {
+    description: 'Create a user',
+    request:  { body: zodToSchemaNode(CreateUserSchema) },
+    response: zodToSchemaNode(CreateUserSchema.extend({ id: z.number() })),
+  }
+));
+```
 
 ---
 
 ## Request Flows
 
-DocTreen can load named request-flow presets into the docs UI and run them through the same shared engine used by the CLI.
+DocTreen loads named request-flow presets into the docs UI and runs them through a shared engine — also available as a CLI.
 
 Flows are first-class in the UI:
 
-- a top-level **Flows** tab keeps flows separate from crowded route docs
-- the Flows tab includes a built-in guide for writing flow JSON
-- the Flows tab includes a built-in flow creator for drafting new flow JSON from documented routes
-- each flow can collect runtime inputs and override `baseUrl`
-- the creator lets you insert `{{input.*}}`, `{{env.*}}`, and `{{vars.*}}` placeholders into step fields
-- prior response fields can be promoted into `extract` entries and reused as `{{vars.*}}`
-- route params can be mapped optionally through a simple param helper instead of editing paths by hand
-- results are shown in both a visual execution timeline and raw JSON
-- the same flow file can be reused for documentation, smoke tests, and CI
+- A top-level **Flows** tab keeps flows separate from route docs
+- The Flows tab includes a built-in guide for writing flow JSON
+- The built-in flow creator lets you assemble draft steps from documented routes
+- Runtime inputs and per-run `baseUrl` overrides are supported
+- `{{input.*}}`, `{{vars.*}}`, and `{{env.*}}` placeholders are supported in all step fields
+- Prior response fields can be promoted into `extract` entries and reused as `{{vars.*}}`
+- Results are shown as both a visual execution timeline and raw JSON
 
 ### Directory-based loading
 
-If a `./doctreen-flows` directory exists, DocTreen will load every `*.json` file in it automatically. You can also point at a custom directory:
+Place `*.json` files in a `./doctreen-flows` directory and they will be loaded automatically. Use `flowsPath` for a custom location:
 
 ```js
-const path = require('path');
-
 app.use(expressAdapter(app, {
-  docsPath: '/docs',
   flowsPath: path.join(__dirname, 'doctreen-flows'),
   meta: { title: 'My API', version: '1.0.0' },
 }));
@@ -183,14 +421,12 @@ app.use(expressAdapter(app, {
 
 ### Inline flows
 
-You can embed flows directly in config:
-
 ```js
 app.use(expressAdapter(app, {
   flows: [
     {
       version: 1,
-      name: 'Login smoke',
+      name: 'Login smoke test',
       baseUrl: 'http://localhost:3000',
       steps: [
         {
@@ -215,53 +451,11 @@ app.use(expressAdapter(app, {
 {
   "version": 1,
   "name": "User onboarding",
-  "baseUrl": "http://localhost:3000",
-  "inputs": {
-    "email": { "type": "string", "required": true }
-  },
-  "steps": [
-    {
-      "id": "create-user",
-      "request": {
-        "method": "POST",
-        "path": "/users",
-        "body": { "email": "{{input.email}}" }
-      },
-      "extract": {
-        "userId": { "from": "body", "path": "$.id" }
-      },
-      "assert": {
-        "status": 201
-      }
-    },
-    {
-      "id": "get-user",
-      "request": {
-        "method": "GET",
-        "path": "/users/{{vars.userId}}"
-      },
-      "assert": {
-        "status": 200,
-        "body": {
-          "$.id": "{{vars.userId}}"
-        }
-      }
-    }
-  ]
-}
-```
-
-### Complete flow example
-
-```json
-{
-  "version": 1,
-  "name": "User onboarding",
   "description": "Create a user, fetch it back, then delete it.",
   "baseUrl": "http://localhost:3000",
   "inputs": {
     "email": { "type": "string", "required": true },
-    "name": { "type": "string", "required": true }
+    "name":  { "type": "string", "required": true }
   },
   "steps": [
     {
@@ -269,33 +463,22 @@ app.use(expressAdapter(app, {
       "request": {
         "method": "POST",
         "path": "/users",
-        "body": {
-          "email": "{{input.email}}",
-          "name": "{{input.name}}"
-        }
+        "body": { "email": "{{input.email}}", "name": "{{input.name}}" }
       },
       "extract": {
         "userId": { "from": "body", "path": "$.id" }
       },
       "assert": {
         "status": 201,
-        "body": {
-          "$.email": "{{input.email}}"
-        }
+        "body": { "$.email": "{{input.email}}" }
       }
     },
     {
       "id": "get-user",
-      "request": {
-        "method": "GET",
-        "path": "/users/{{vars.userId}}"
-      },
+      "request": { "method": "GET", "path": "/users/{{vars.userId}}" },
       "assert": {
         "status": 200,
-        "body": {
-          "$.id": "{{vars.userId}}"
-        },
-        "exists": ["$.email", "$.createdAt"]
+        "exists": ["$.id", "$.createdAt"]
       }
     }
   ]
@@ -304,84 +487,61 @@ app.use(expressAdapter(app, {
 
 ### Variable namespaces
 
-```json
-{
-  "baseUrl": "{{env.baseUrl}}",
-  "request": {
-    "path": "/users/{{vars.userId}}",
-    "body": {
-      "email": "{{input.email}}"
-    }
-  }
-}
-```
-
-- `{{input.*}}`: runtime values entered in the docs UI or CLI
-- `{{vars.*}}`: values extracted from previous steps
-- `{{env.*}}`: values coming from the flow file or environment overrides
-
-### Extract + assert example
-
-```json
-{
-  "extract": {
-    "userId": { "from": "body", "path": "$.id" },
-    "etag":   { "from": "header", "path": "etag" }
-  },
-  "assert": {
-    "status": 201,
-    "body": {
-      "$.email": "{{input.email}}"
-    },
-    "exists": ["$.id", "$.createdAt"]
-  }
-}
-```
-
-### In the docs UI
-
-- Flow presets appear in their own **Flows** tab
-- The Flows tab includes a built-in information section with JSON examples and creation guidance
-- The Flows tab also includes a flow creator that can:
-  - add documented routes as draft steps
-  - edit flow-level `description`, `baseUrl`, `env`, and `inputs`
-  - insert `input`, `env`, and extracted `vars` placeholders into request fields
-  - capture values from earlier response schemas and automatically create matching `extract` rules
-  - optionally map route params to placeholders without rewriting the whole path manually
-- Each flow can collect runtime inputs, override `baseUrl`, and run via the docs server
-- Results are shown as both:
-  - an execution timeline with step-by-step request/response cards
-  - raw JSON from the shared flow runner
-- The same preset can work as both a demo scenario and an integration-test asset
+| Namespace | Source |
+|---|---|
+| `{{input.*}}` | Runtime values entered in the docs UI or CLI |
+| `{{vars.*}}` | Values extracted from previous step responses |
+| `{{env.*}}` | Values from the flow file or environment overrides |
 
 ### CLI runner
 
-DocTreen also ships a small CLI for running the same flow files headlessly:
-
 ```bash
-doctreen-flow run doctreen-flows/user-onboarding.json --input email=alice@example.com --input name='Alice Smith'
+doctreen-flow run doctreen-flows/user-onboarding.json \
+  --input email=alice@example.com \
+  --input name='Alice Smith'
+
+# Named environment
+doctreen-flow run doctreen-flows/user-onboarding.json --env staging
+
+# Explicit environment file + JSON report
+doctreen-flow run doctreen-flows/user-onboarding.json \
+  --env ./doctreen-flows/environments/staging.json \
+  --report json
 ```
 
-Use named or explicit environment files:
+**CLI flags:**
 
-```bash
-doctreen-flow run doctreen-flows/user-onboarding.json --env local
-doctreen-flow run doctreen-flows/user-onboarding.json --env ./doctreen-flows/environments/staging.json --report json
-```
-
-Supported CLI flags:
-
-- `--env <name|file>`
-- `--base-url <url>`
-- `--input key=value`
-- `--no-bail`
-- `--report text|json`
+| Flag | Description |
+|---|---|
+| `--env <name\|file>` | Load an environment preset |
+| `--base-url <url>` | Override `baseUrl` for this run |
+| `--input key=value` | Supply runtime inputs |
+| `--no-bail` | Continue running after a failed step |
+| `--report text\|json` | Output format (default: `text`) |
 
 ---
 
 ## Documenting Routes with JSDoc
 
-DocTreen reads JSDoc from the handler function source. In practice, that means the JSDoc block should be placed inside the handler, at the top of the function body. Supported tags:
+> JSDoc parsing is available for **Express**, **Fastify**, **Hono**, and **Koa**.  
+> For **NestJS**, use `@DocRoute` and the decorator API instead.
+
+DocTreen reads JSDoc from handler function source at runtime. Place the JSDoc block **inside** the handler function body (at the top):
+
+```js
+app.get('/users/:id', function (req, res) {
+  /**
+   * @description Get a user by ID
+   * @param  {string} query.fields  Comma-separated fields to return
+   * @response {string} id
+   * @response {string} name
+   * @response {string} email
+   */
+  res.json({ id: req.params.id, name: 'Alice', email: 'alice@example.com' });
+});
+```
+
+### Supported JSDoc tags
 
 | Tag | Description | Example |
 |---|---|---|
@@ -392,116 +552,112 @@ DocTreen reads JSDoc from the handler function source. In practice, that means t
 | `@returns {Type}` | Full response type (schema ref) | `@returns {User}` |
 | `@header Name - value` | Request header | `@header Authorization - Bearer <token>` |
 
-### Optional Fields
-
-Wrap a field name in `[brackets]` to mark it as optional:
+Wrap a field name in `[brackets]` to mark it optional:
 
 ```js
 /**
- * @param {string} body.name
- * @param {string} [body.bio]       optional
- * @param {number} [body.age]       optional
+ * @param {string}  body.name
+ * @param {string}  [body.bio]    optional
+ * @param {number}  [body.age]    optional
  */
-app.post('/users', handler);
 ```
-
-### Example
-
-```js
-app.get('/users/:id', function (req, res) {
-  /**
-   * @description Get a user by ID
-   * @response {string} id
-   * @returns {User}
-   */
-  // ...
-  res.json({ id: req.params.id });
-});
-```
-
-Use `@param {type} query.name` for query fields and `@param {type} body.name` for body fields. Path params are still discovered from the route path itself. If you prefer comments above the route declaration or need stricter control, use `defineRoute(...)` instead of relying on JSDoc parsing.
 
 ---
 
-## Schema API
+## Schema Builder
 
-DocTreen ships a schema builder (`s`) for defining typed request and response shapes.
-
-### Primitive builders
+DocTreen ships a lightweight schema builder (`s`) for defining typed request and response shapes without a runtime schema library.
 
 ```js
 const { s } = require('doctreen');
+// import { s } from 'doctreen';
 
-s.string()    // { type: 'string' }
-s.number()    // { type: 'number' }
-s.boolean()   // { type: 'boolean' }
-s.any()       // { type: 'any' }
-```
+s.string()            // { type: 'string' }
+s.number()            // { type: 'number' }
+s.boolean()           // { type: 'boolean' }
+s.null()              // { type: 'null' }
+s.unknown()           // { type: 'unknown' }
 
-### Composite builders
-
-```js
-s.object({ name: s.string(), age: s.number() })
-s.array(s.string())
-s.array(s.object({ id: s.number() }))
-```
-
-### Optional fields
-
-```js
 s.object({
+  id:   s.number(),
   name: s.string(),
-  bio: s.optional(s.string()),    // marked as optional — shown with ? in UI
+  bio:  s.optional(s.string()),   // optional field — shown with ? in the UI
 })
+
+s.array(s.string())
+s.array(s.object({ id: s.number(), tag: s.string() }))
+
+s.optional(s.string())  // wraps any node as optional
+```
+
+`s` is re-exported from all adapter packages for convenience:
+
+```js
+const { s } = require('doctreen/express');
+const { s } = require('doctreen/fastify');
+const { s } = require('doctreen/hono');
+const { s } = require('doctreen/koa');
+const { s } = require('doctreen/nest');
 ```
 
 ---
 
-## Named Schemas with `defineSchema`
+## Named Schemas
 
-Register a reusable schema by name and reference it in JSDoc with `{SchemaName}` or `{SchemaName[]}`:
+Register a schema under a name and reference it in JSDoc with `{TypeName}` or `{TypeName[]}`:
 
 ```js
 const { defineSchema, s } = require('doctreen');
 
 defineSchema('User', s.object({
-  id: s.number(),
-  name: s.string(),
-  email: s.string(),
+  id:     s.number(),
+  name:   s.string(),
+  email:  s.string(),
   active: s.boolean(),
-  bio: s.optional(s.string()),
+  bio:    s.optional(s.string()),
 }));
 
-/**
- * @description Get all users
- * @response {User[]} users
- */
-app.get('/users', (req, res) => { /* ... */ });
+app.get('/users', function (req, res) {
+  /**
+   * @description List all users
+   * @returns {User[]}
+   */
+  res.json([]);
+});
 
-/**
- * @description Get a user by ID
- * @returns {User}
- */
-app.get('/users/:id', (req, res) => { /* ... */ });
+app.get('/users/:id', function (req, res) {
+  /**
+   * @description Get a user by ID
+   * @returns {User}
+   */
+  res.json({ id: 1, name: 'Alice', email: 'alice@example.com', active: true });
+});
 ```
+
+`defineSchema` is also re-exported from all adapter packages.
 
 ---
 
 ## Explicit Route Definition with `defineRoute`
 
-For full control over how a route appears in the docs, wrap your handler with `defineRoute`. Works the same across all adapters:
+For full control, wrap a handler with `defineRoute`. Works the same across Express, Fastify, Hono, and Koa:
 
 ```js
-const { defineRoute, s } = require('doctreen/express'); // or 'doctreen/fastify' / 'doctreen/koa'
-// import { defineRoute, s } from 'doctreen/hono';       // Hono (ESM)
+const { defineRoute, s } = require('doctreen/express');
+// const { defineRoute, s } = require('doctreen/fastify');
+// import { defineRoute, s } from 'doctreen/hono';
+// const { defineRoute, s } = require('doctreen/koa');
 
 app.post('/users', defineRoute(
   (req, res) => {
     res.status(201).json({ id: 1, name: req.body.name });
   },
   {
-    description: 'Create a new user account.',
-    headers: { Authorization: 'Bearer <token>', 'Content-Type': 'application/json' },
+    description: 'Create a new user account',
+    headers: {
+      Authorization:  'Bearer <token>',
+      'Content-Type': 'application/json',
+    },
     request: {
       body:  s.object({ name: s.string(), email: s.string(), role: s.optional(s.string()) }),
       query: null,
@@ -515,11 +671,19 @@ app.post('/users', defineRoute(
 ));
 ```
 
-`defineRoute` takes priority over JSDoc, which takes priority over runtime inference (Express) or Fastify native JSON Schema.
+**Schema resolution order (first wins):**
 
-### Fastify Native JSON Schema
+| Adapter | Priority |
+|---|---|
+| Express | `defineRoute` → JSDoc → runtime inference |
+| Fastify | `defineRoute` → Fastify native JSON Schema → JSDoc |
+| Hono | `defineRoute` → JSDoc |
+| Koa | `defineRoute` → JSDoc |
+| NestJS | `@DocRoute` / `@Doc*` decorators |
 
-If you use Fastify's built-in `schema` option on a route, DocTreen reads it automatically — no `defineRoute` needed:
+### Fastify native JSON Schema
+
+If you already annotate routes with Fastify's built-in `schema` option, DocTreen reads it automatically — no `defineRoute` needed:
 
 ```js
 fastify.get('/users/:id', {
@@ -540,11 +704,11 @@ fastify.get('/users/:id', {
 });
 ```
 
-The `body`, `querystring`, `response`, and `description` fields from the Fastify schema are all converted to DocTreen's internal schema format and shown in the UI. `defineRoute` takes priority over native schema if both are present.
+---
 
-### Error Responses
+## Error Responses
 
-The `errors` field documents possible error responses for a route. Each key is an HTTP status code; the value is either a plain description string or an object with an optional `description` and/or `schema`.
+Document possible error responses via the `errors` field (available in `defineRoute` and `@DocRoute`):
 
 ```js
 errors: {
@@ -557,208 +721,242 @@ errors: {
     schema: s.object({ message: s.string(), field: s.string() }),
   },
 
-  // Object — schema only (no description)
+  // Object — schema only
   500: { schema: s.object({ message: s.string() }) },
 }
 ```
 
-Errors appear in the **Response** column of each route's detail panel (colour-coded by status class: amber for 4xx, red for 5xx), and are included as saved example responses when exporting to Postman.
+Error responses appear in each route's detail panel, colour-coded by class (amber for 4xx, red for 5xx), and are exported as saved examples when downloading a Postman collection.
 
 ---
 
 ## UI Features
 
 ### Route Browser
-- Sidebar lists all routes grouped by section or HTTP method
-- Color-coded method pills (GET, POST, PUT, PATCH, DELETE)
-- Property count badge on routes with defined schemas
-- Search/filter by path or method
-- Lives in its own top-level **Routes** tab when flows are enabled
+- Sidebar groups routes by section (from `groups` config) or by first path segment
+- Color-coded method pills — GET, POST, PUT, PATCH, DELETE
+- Property-count badge on routes with defined schemas
+- Lives in its own **Routes** tab when flows are also enabled
 
 ### Route Detail Panel
 - Full schema tree for request body, query params, path params, and response
-- **Error responses** — colour-coded by status class (amber 4xx, red 5xx) with optional body schema
+- Error responses — colour-coded by status class, with optional body schema
 - Optional fields shown with `?` suffix
-- **Copy as cURL** — generates a ready-to-run curl command with example values
-- **Copy for LLM** — generates a structured markdown prompt describing the endpoint (useful for AI-assisted development)
-- **Export to Postman** — downloads a Postman Collection v2.1 JSON file; error responses are included as saved example responses
+- **Copy as cURL** — ready-to-run curl command with example values filled in
+- **Copy for LLM** — structured markdown description of the endpoint (useful for AI-assisted development)
+- **Export to Postman** — downloads a Postman Collection v2.1 JSON; error responses are included as saved example responses
 
 ### Flow Runner
-- Loads request-flow presets from `flows` config or `flowsPath`
-- Uses a dedicated top-level **Flows** tab so flows stay separate from route documentation
-- Includes an information section with flow authoring guidance and JSON examples
-- Includes a built-in flow creator for assembling draft flows from documented routes
-- Lets you insert `input`, `env`, and existing `vars` placeholders into step fields
-- Can capture values from earlier response schemas and convert them into reusable `extract` rules
-- Supports optional route-param mapping helpers for `:id`-style params
-- Runs named flows directly inside the docs UI
-- Collects runtime inputs and supports per-run `baseUrl` overrides
-- Shows flow execution results as:
-  - a visual timeline with per-step request/response details
-  - raw JSON output from the shared runner
-- Uses the same flow definition format as the `doctreen-flow` CLI
+- Dedicated **Flows** tab, separate from route documentation
+- Built-in authoring guide with JSON examples
+- Flow creator — assemble steps from documented routes, insert placeholders, map path params
+- Capture prior response fields and convert them to `extract` rules automatically
+- Run flows inside the UI with live input collection and `baseUrl` override
+- Visual execution timeline with per-step request/response details
+- Raw JSON output from the shared runner
+- Same format works with the `doctreen-flow` CLI
 
 ---
 
 ## TypeScript
 
-DocTreen ships declaration files alongside the JavaScript. You do not need a separate `@types/doctreen` package.
+DocTreen ships declaration files alongside the JavaScript. No separate `@types/doctreen` package is needed.
 
-### Quick Start (TypeScript)
+### Express
 
 ```ts
-// Express
 import express from 'express';
-import { expressAdapter } from 'doctreen/express';
-import { s, UserConfig } from 'doctreen';
+import { expressAdapter, defineRoute, RouteSchemas } from 'doctreen/express';
+import { s } from 'doctreen';
 
 const app = express();
 app.use(express.json());
-app.use(expressAdapter(app, { meta: { title: 'My API', version: '1.0.0' } }));
 
-// Fastify
+app.post('/users', defineRoute<{ name: string }, never, { id: number; name: string }>(
+  (req, res) => res.status(201).json({ id: 1, name: req.body.name }),
+  {
+    description: 'Create a user',
+    request:  { body: s.object({ name: s.string() }) },
+    response: s.object({ id: s.number(), name: s.string() }),
+    errors:   { 409: 'Email already in use' },
+  }
+));
+
+app.use(expressAdapter(app, { meta: { title: 'My API', version: '1.0.0' } }));
+app.listen(3000);
+```
+
+### Fastify
+
+```ts
 import Fastify from 'fastify';
 import { fastifyAdapter } from 'doctreen/fastify';
 
 const fastify = Fastify();
-fastifyAdapter(fastify, { docsPath: '/api/docs', meta: { title: 'My API', version: '1.0.0' } });
+fastifyAdapter(fastify, { meta: { title: 'My API', version: '1.0.0' } });
 
-// Hono
+fastify.get('/users', async (req, reply) => reply.send([]));
+fastify.listen({ port: 3000 });
+```
+
+### Hono
+
+```ts
 import { Hono } from 'hono';
 import { honoAdapter } from 'doctreen/hono';
 
-const honoApp = new Hono();
-honoAdapter(honoApp, { docsPath: '/api/docs', meta: { title: 'My API', version: '1.0.0' } });
+const app = new Hono();
+honoAdapter(app, { meta: { title: 'My API', version: '1.0.0' } });
+```
 
-// Koa
+### Koa
+
+```ts
 import Koa from 'koa';
 import Router from '@koa/router';
 import { koaAdapter } from 'doctreen/koa';
 
-const koaApp    = new Koa();
-const koaRouter = new Router();
-koaAdapter(koaRouter, { docsPath: '/api/docs', meta: { title: 'My API', version: '1.0.0' } });
-koaApp.use(koaRouter.routes());
+const app    = new Koa();
+const router = new Router();
+
+koaAdapter(router, { meta: { title: 'My API', version: '1.0.0' } });
+
+app.use(router.routes());
+app.use(router.allowedMethods());
 ```
 
-### Typed Schemas
+### NestJS
 
 ```ts
-import { defineSchema, defineRoute, s, SchemaNode } from 'doctreen';
+import 'reflect-metadata';
+import { NestFactory } from '@nestjs/core';
+import { Controller, Get, Post, Body, Module } from '@nestjs/common';
+import { nestAdapter, DocRoute, DocDescription, DocResponse } from 'doctreen/nest';
+import { z } from 'zod';
 
-defineSchema('User', s.object({
-  id: s.number(),
-  name: s.string(),
-  email: s.string(),
-  bio: s.optional(s.string()),
-}));
+const UserSchema = z.object({ id: z.number(), name: z.string() });
 
-app.post('/users', defineRoute<CreateUserBody, never, User>(
-  (req, res) => {
-    res.status(201).json({ id: 1, ...req.body });
-  },
-  {
+@Controller('users')
+class UsersController {
+  @Get()
+  @DocDescription('List all users')
+  @DocResponse(z.array(UserSchema))
+  getUsers() { return []; }
+
+  @Post()
+  @DocRoute({
     description: 'Create a user',
-    request: {
-      body:  s.object({ name: s.string(), email: s.string(), role: s.optional(s.string()) }),
-      query: null,
-    },
-    response: s.object({ id: s.number(), name: s.string() }),
-    errors: {
-      409: 'Email already in use',
-      422: { description: 'Validation failed', schema: s.object({ message: s.string() }) },
-    },
+    request:  { body: z.object({ name: z.string() }) },
+    response: UserSchema,
+    errors:   { 409: 'Email already in use' },
+  })
+  createUser(@Body() body: { name: string }) {
+    return { id: 1, ...body };
   }
-));
+}
 
-// Build a schema node dynamically — fully typed
-const mySchema: SchemaNode = s.array(s.object({
-  id: s.number(),
-  tags: s.array(s.string()),
-}));
+@Module({ controllers: [UsersController] })
+class AppModule {}
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  nestAdapter(app, { meta: { title: 'My API', version: '1.0.0' } });
+  await app.listen(3000);
+}
+bootstrap();
 ```
 
-### Available Types
+### Available types
 
 ```ts
 import type {
-  SchemaNode,      // { type, properties?, items?, optional? }
-  RouteEntry,      // { method, path, params?, description?, errors?, ... }
-  ErrorEntry,      // { status, description, schema }
-  UserConfig,      // full config object shape
+  SchemaNode,       // { type, properties?, items?, optional? }
+  RouteEntry,       // { method, path, params, description, errors, ... }
+  ErrorEntry,       // { status, description, schema }
+  UserConfig,       // full config object shape
   NormalizedConfig,
   ApiMeta,
   RouteRegistry,
 } from 'doctreen';
 
-import type { RouteSchemas, ExpressLike }   from 'doctreen/express';
-import type { RouteSchemas, FastifyLike }   from 'doctreen/fastify';
-import type { RouteSchemas, HonoLike }      from 'doctreen/hono';
-import type { RouteSchemas, KoaRouterLike } from 'doctreen/koa';
+import type { RouteSchemas, ExpressLike }              from 'doctreen/express';
+import type { RouteSchemas, FastifyLike }              from 'doctreen/fastify';
+import type { RouteSchemas, HonoLike }                 from 'doctreen/hono';
+import type { RouteSchemas, KoaRouterLike }            from 'doctreen/koa';
+import type { NestRouteSchemas, NestApplicationLike }  from 'doctreen/nest';
 ```
 
-`ExpressLike`, `FastifyLike`, `HonoLike`, and `KoaRouterLike` are structural interfaces exposed by DocTreen. You may still need your framework's own type packages depending on how your application is typed.
+The structural interfaces (`ExpressLike`, `FastifyLike`, etc.) let you use doctreen without depending on a specific framework's type package.
 
 ---
 
 ## How It Works
 
 ### Express
-1. `expressAdapter(app, config)` registers a middleware at `docsPath`
-2. On the first request to `/docs`, DocTreen walks `app._router.stack` to discover all registered routes (lazy introspection — solves the middleware-before-routes ordering problem)
-3. Route handlers are wrapped so real HTTP traffic populates request/response schemas automatically
-4. JSDoc comments on handler functions are parsed at runtime via `fn.toString()`
-5. If flows are configured, `POST /docs/__flows/run` executes them through the shared runner when `docsPath` is `/docs`
-6. The UI is served as a self-contained HTML page with zero external dependencies
+
+1. `expressAdapter(app, config)` returns a middleware registered at `docsPath`.
+2. On the first request to `/docs`, DocTreen walks `app._router.stack` recursively to discover all registered routes — lazy introspection solves the middleware-before-routes ordering problem.
+3. Route handlers are wrapped so real HTTP traffic automatically populates request and response schemas.
+4. JSDoc comments inside handler functions are parsed via `fn.toString()` at runtime.
+5. If flows are configured, `POST /docs/__flows/run` executes them through the shared runner.
 
 ### Fastify
-1. `fastifyAdapter(fastify, config)` registers a Fastify `onRoute` hook and adds the docs GET route
-2. Every route added after `fastifyAdapter` is captured by the hook at registration time — no traffic needed
-3. Schema resolution order: `defineRoute` → Fastify native JSON Schema → JSDoc block comment
-4. Named schemas registered with `defineSchema` are resolved when referenced in JSDoc tags
-5. If flows are configured, `POST <docsPath>/__flows/run` executes them through the shared runner
+
+1. `fastifyAdapter(fastify, config)` registers an `onRoute` hook and adds the docs GET route.
+2. Every route added **after** `fastifyAdapter` is captured by the hook at registration time — no traffic needed.
+3. Schema resolution order: `defineRoute` → Fastify native JSON Schema → JSDoc.
 
 ### Hono
-1. `honoAdapter(app, config)` adds a GET route at `docsPath` to the Hono app
-2. On the first request to the docs page, `app.routes` is read — all routes registered by then are shown
-3. Can be called **before or after** your routes (lazy read at request time)
-4. Schema resolution order: `defineRoute` → JSDoc block comment
-5. If flows are configured, `POST <docsPath>/__flows/run` executes them through the shared runner
-6. The adapter reads Hono route metadata lazily and works with Hono apps; the included example uses Node.js via `@hono/node-server`
+
+1. `honoAdapter(app, config)` adds a GET route at `docsPath` to the Hono app.
+2. On the first request to the docs page, `app.routes` is read — all routes registered by that time are shown.
+3. Can be called **before or after** your routes (lazy read at request time).
+4. Schema resolution order: `defineRoute` → JSDoc.
 
 ### Koa
-1. `koaAdapter(router, config)` adds a GET route at `docsPath` to the `@koa/router` instance
-2. On the first request to the docs page, `router.stack` is read — all routes registered by then are shown
-3. Can be called **before or after** your routes (lazy read at request time)
-4. Schema resolution order: `defineRoute` → JSDoc block comment
-5. If flows are configured, `POST <docsPath>/__flows/run` executes them through the shared runner
-6. Mount the router on the Koa app as usual: `app.use(router.routes())`
+
+1. `koaAdapter(router, config)` adds a GET route at `docsPath` to the `@koa/router` instance.
+2. On the first request to the docs page, `router.stack` is read — all routes registered by that time are shown.
+3. Can be called **before or after** your routes (lazy read at request time).
+4. Schema resolution order: `defineRoute` → JSDoc.
+
+### NestJS
+
+1. `nestAdapter(app, config)` is called after `NestFactory.create()` and before `app.listen()`.
+2. It registers the docs route directly on the underlying HTTP adapter (Express or Fastify platform), bypassing NestJS guards and interceptors — this is intentional for an internal docs endpoint.
+3. Route discovery reads NestJS's internal container (`app.container.getModules()`) to enumerate all controllers and their methods.
+4. For each controller method, it reads `Reflect.getMetadata('path', fn)` and `Reflect.getMetadata('method', fn)` — the same metadata keys set by `@Get()`, `@Post()`, etc.
+5. `@DocRoute` and `@Doc*` decorators attach their schemas under a separate metadata key on the same method function.
+6. The global prefix (set via `app.setGlobalPrefix(...)`) is prepended to all discovered paths.
+7. Schema resolution order: `@DocRoute` / `@Doc*` decorators (no JSDoc or runtime-inference fallback in NestJS).
 
 ---
 
 ## Example Apps
 
 ```bash
-npm run example             # Express JS    → http://localhost:3000/api/docs
-npm run example:ts          # Express TS    → http://localhost:3000/api/docs
-npm run example:fastify     # Fastify JS    → http://localhost:3001/api/docs
-npm run example:fastify:ts  # Fastify TS    → http://localhost:3001/api/docs
-npm run example:hono        # Hono JS       → http://localhost:3002/api/docs
-npm run example:hono:ts     # Hono TS       → http://localhost:3002/api/docs
-npm run example:koa         # Koa JS        → http://localhost:3003/api/docs
-npm run example:koa:ts      # Koa TS        → http://localhost:3003/api/docs
+npm run example             # Express JS     → http://localhost:3000/api/docs
+npm run example:ts          # Express TS     → http://localhost:3000/api/docs
+npm run example:fastify     # Fastify JS     → http://localhost:3001/api/docs
+npm run example:fastify:ts  # Fastify TS     → http://localhost:3001/api/docs
+npm run example:hono        # Hono JS        → http://localhost:3002/api/docs
+npm run example:hono:ts     # Hono TS        → http://localhost:3002/api/docs
+npm run example:koa         # Koa JS         → http://localhost:3003/api/docs
+npm run example:koa:ts      # Koa TS         → http://localhost:3003/api/docs
+npm run example:nest        # NestJS TS      → http://localhost:3001/docs
 ```
 
-| File | Framework | Notes |
-|------|-----------|-------|
+| File | Framework | Highlights |
+|---|---|---|
 | [`example/app.js`](./example/app.js) | Express | JSDoc, `defineRoute`, named schemas, error responses, flow presets |
 | [`example/app.ts`](./example/app.ts) | Express | Fully typed with `defineRoute` generics, flow presets |
 | [`example/fastify-app.js`](./example/fastify-app.js) | Fastify | JSDoc, `defineRoute`, Fastify native JSON Schema, flow presets |
 | [`example/fastify-app.ts`](./example/fastify-app.ts) | Fastify | Fully typed with Fastify route generics, flow presets |
-| [`example/hono-app.js`](./example/hono-app.js) | Hono | JSDoc, `defineRoute`; run via `npx tsx`; flow presets |
-| [`example/hono-app.ts`](./example/hono-app.ts) | Hono | Fully typed with Hono `Context`, flow presets |
-| [`example/koa-app.js`](./example/koa-app.js) | Koa | JSDoc, `defineRoute`; uses `@koa/router`; flow presets |
-| [`example/koa-app.ts`](./example/koa-app.ts) | Koa | Fully typed with `Router.RouterContext`, flow presets |
+| [`example/hono-app.js`](./example/hono-app.js) | Hono | JSDoc, `defineRoute`; run via `npx tsx` |
+| [`example/hono-app.ts`](./example/hono-app.ts) | Hono | Fully typed with Hono `Context` |
+| [`example/koa-app.js`](./example/koa-app.js) | Koa | JSDoc, `defineRoute`, `@koa/router` |
+| [`example/koa-app.ts`](./example/koa-app.ts) | Koa | Fully typed with `Router.RouterContext` |
+| [`example/nest-app.ts`](./example/nest-app.ts) | NestJS | `@DocRoute`, `@Doc*` decorators, Zod schemas, `s` builder |
 
 ---
 
