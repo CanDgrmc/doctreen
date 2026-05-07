@@ -1,6 +1,6 @@
 {
   "name": "doctreen",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Auto-generates and serves API documentation for Node.js backends via middleware",
   "main": "src/index.js",
   "types": "src/index.d.ts",
@@ -28,6 +28,14 @@
       "types": "./src/adapters/koa.d.ts",
       "default": "./src/adapters/koa.js"
     },
+    "./nest": {
+      "types": "./src/adapters/nest.d.ts",
+      "default": "./src/adapters/nest.js"
+    },
+    "./zod": {
+      "types": "./src/adapters/zod.d.ts",
+      "default": "./src/adapters/zod.js"
+    },
     "./flows": {
       "types": "./src/flows/index.d.ts",
       "default": "./src/flows/index.js"
@@ -41,7 +49,8 @@
     "example:hono": "npx tsx example/hono-app.js",
     "example:hono:ts": "npx tsx example/hono-app.ts",
     "example:koa": "node example/koa-app.js",
-    "example:koa:ts": "npx tsx example/koa-app.ts"
+    "example:koa:ts": "npx tsx example/koa-app.ts",
+    "example:nest": "npx tsx example/nest-app.ts"
   },
   "keywords": [
     "api",
@@ -51,6 +60,7 @@
     "fastify",
     "hono",
     "koa",
+    "nestjs",
     "auto-docs"
   ],
   "license": "MIT",
@@ -79,6 +89,12 @@
     "fastify": "^5.8.4",
     "hono": "^4.7.0",
     "koa": "^2.15.0",
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0",
+    "@nestjs/platform-express": "^10.0.0",
+    "reflect-metadata": "^0.2.0",
+    "rxjs": "^7.8.0",
+    "zod": "^3.22.0"
   }
 }
