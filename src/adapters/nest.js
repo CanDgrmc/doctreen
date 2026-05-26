@@ -6,7 +6,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = requi
 const { serveDocsUI } = require('../ui/index');
 const { convertSchema, normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
-const { createDriftPipeline } = require('../internal/drift');
+const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 /** Duck-type check for "this is a Zod schema instance". */
@@ -430,6 +430,15 @@ function nestAdapter(app, userConfig) {
         : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
       reply.header('Content-Type', 'application/json; charset=utf-8').send(report);
     });
+    httpAdapter.post(config.docsPath + '/drift/reset', async function (req, reply) {
+      const auth = authorizeReset(config._drift, req.headers || {}, req.query || {});
+      if (!auth.ok) {
+        reply.code(auth.status).header('Content-Type', 'application/json; charset=utf-8').send({ ok: false, error: auth.error });
+        return;
+      }
+      await Promise.resolve(config._drift.reset());
+      reply.code(200).header('Content-Type', 'application/json; charset=utf-8').send({ ok: true, clearedAt: Date.now() });
+    });
   } else {
     // Express (default platform) and any other adapter that uses Node's
     // IncomingMessage / ServerResponse signature.
@@ -449,6 +458,21 @@ function nestAdapter(app, userConfig) {
         : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.send(JSON.stringify(report, null, 2));
+    });
+    httpAdapter.post(config.docsPath + '/drift/reset', async function (req, res) {
+      // Nest/Express path uses the underlying http adapter — body parser is
+      // already mounted globally if NestJS body-parsing is on; we only need
+      // headers + query for auth, the request body is irrelevant.
+      const auth = authorizeReset(config._drift, req.headers || {}, req.query || {});
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      if (!auth.ok) {
+        res.statusCode = auth.status;
+        res.send(JSON.stringify({ ok: false, error: auth.error }));
+        return;
+      }
+      await Promise.resolve(config._drift.reset());
+      res.statusCode = 200;
+      res.send(JSON.stringify({ ok: true, clearedAt: Date.now() }));
     });
   }
 

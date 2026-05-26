@@ -15,7 +15,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
-const { createDriftPipeline } = require('../internal/drift');
+const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 // Only document these HTTP methods — skip ALL, OPTIONS, HEAD (internal/auto-added)
@@ -271,6 +271,18 @@ function honoAdapter(app, userConfig) {
       ? await Promise.resolve(config._drift.report())
       : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
     return c.json(report);
+  });
+
+  app.post(config.docsPath + '/drift/reset', async function resetDrift(c) {
+    const headers = {};
+    // Hono's Headers is iterable — flatten to a lowercase-keyed plain object.
+    try { c.req.raw.headers.forEach(function (v, k) { headers[k.toLowerCase()] = v; }); } catch (_) {}
+    const url = new URL(c.req.url);
+    const query = Object.fromEntries(url.searchParams);
+    const auth = authorizeReset(config._drift, headers, query);
+    if (!auth.ok) return c.json({ ok: false, error: auth.error }, auth.status);
+    await Promise.resolve(config._drift.reset());
+    return c.json({ ok: true, clearedAt: Date.now() });
   });
 
   app.post(config.docsPath + '/__flows/run', async function runDocsFlow(c) {

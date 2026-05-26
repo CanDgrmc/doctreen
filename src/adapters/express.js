@@ -31,7 +31,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, inferSchema, parseJSDoc, 
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { createDriftPipeline } = require('../internal/drift');
+const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -505,6 +505,25 @@ function expressAdapter(app, userConfig = {}) {
         : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
       Promise.resolve(report).then(function (r) {
         res.end(JSON.stringify(r, null, 2));
+      });
+      return;
+    }
+
+    const driftResetPath = config.docsPath + '/drift/reset';
+    if (req.path === driftResetPath || (req.url || '').split('?')[0] === driftResetPath) {
+      if (req.method !== 'POST') return next();
+      const headers = req.headers || {};
+      const query = req.query || {};
+      const auth = authorizeReset(config._drift, headers, query);
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      if (!auth.ok) {
+        res.statusCode = auth.status;
+        res.end(JSON.stringify({ ok: false, error: auth.error }));
+        return;
+      }
+      Promise.resolve(config._drift.reset()).then(function () {
+        res.statusCode = 200;
+        res.end(JSON.stringify({ ok: true, clearedAt: Date.now() }));
       });
       return;
     }

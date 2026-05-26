@@ -6,12 +6,16 @@
  *
  * Subcommands:
  *   drift report --url <docsUrl> [--fail-on-mismatch] [--json] [--min-issues N]
+ *   drift reset  --url <docsUrl> [--token <token>] [--json]
  *
- * The drift CLI hits `<docsUrl>/drift.json` (or `<docsUrl>` if it already
- * ends in `/drift.json`) on a running doctreen-enabled server and prints a
- * human-readable summary. With `--fail-on-mismatch` it exits with code 1
- * when any drift is reported — the recommended invocation for CI integration
- * tests so PRs catch shape changes before they merge.
+ * `report` hits `<docsUrl>/drift.json` (or `<docsUrl>` if it already ends in
+ * `/drift.json`) and prints a human-readable summary. With `--fail-on-mismatch`
+ * it exits with code 1 when any drift is reported — the recommended invocation
+ * for CI integration tests so PRs catch shape changes before they merge.
+ *
+ * `reset` POSTs to `<docsUrl>/drift/reset` and clears the in-memory store.
+ * The server must opt in by setting `drift.allowReset: true`. If
+ * `drift.resetToken` is configured, pass `--token <token>` to authenticate.
  *
  * Run with: `npx doctreen drift report --url http://localhost:3000/docs`
  */
@@ -23,12 +27,12 @@ function printRootUsage() {
   console.error('');
   console.error('Commands:');
   console.error('  drift report   Print a schema drift report from a running server');
-  console.error('  drift reset    Clear the in-memory drift store on a running server (not yet implemented server-side)');
+  console.error('  drift reset    Clear the in-memory drift store on a running server');
   console.error('');
   console.error('Run `' + PROGRAM + ' <command> --help` for command-specific options.');
 }
 
-function printDriftUsage() {
+function printDriftReportUsage() {
   console.error('Usage: ' + PROGRAM + ' drift report --url <docsUrl> [options]');
   console.error('');
   console.error('Options:');
@@ -37,6 +41,19 @@ function printDriftUsage() {
   console.error('  --min-issues <N>      Only fail when total issues >= N (default 1)');
   console.error('  --json                Print the raw JSON report instead of a table');
   console.error('  --route <pattern>     Filter rows by path substring');
+  console.error('  -h, --help            Show this help');
+}
+
+function printDriftResetUsage() {
+  console.error('Usage: ' + PROGRAM + ' drift reset --url <docsUrl> [options]');
+  console.error('');
+  console.error('POST <docsUrl>/drift/reset to clear the in-memory drift store.');
+  console.error('Requires `drift.allowReset: true` on the server.');
+  console.error('');
+  console.error('Options:');
+  console.error('  --url <docsUrl>       URL to the docs root (required)');
+  console.error('  --token <token>       Reset token (when drift.resetToken is set server-side)');
+  console.error('  --json                Print the raw JSON response');
   console.error('  -h, --help            Show this help');
 }
 
@@ -57,10 +74,22 @@ function parseArgs(argv) {
         else if (a === '--json') opts.json = true;
         else if (a === '--min-issues') opts.minIssues = parseInt(args.shift(), 10) || 1;
         else if (a === '--route') opts.route = args.shift();
-        else if (a === '-h' || a === '--help') return { command: 'drift-help' };
-        else { console.error('Unknown option: ' + a); return { command: 'drift-help', error: true }; }
+        else if (a === '-h' || a === '--help') return { command: 'drift-report-help' };
+        else { console.error('Unknown option: ' + a); return { command: 'drift-report-help', error: true }; }
       }
       return { command: 'drift-report', opts: opts };
+    }
+    if (sub === 'reset') {
+      const opts = { json: false, url: null, token: null };
+      while (args.length) {
+        const a = args.shift();
+        if (a === '--url') opts.url = args.shift();
+        else if (a === '--token') opts.token = args.shift();
+        else if (a === '--json') opts.json = true;
+        else if (a === '-h' || a === '--help') return { command: 'drift-reset-help' };
+        else { console.error('Unknown option: ' + a); return { command: 'drift-reset-help', error: true }; }
+      }
+      return { command: 'drift-reset', opts: opts };
     }
     return { command: 'drift-help', error: true };
   }
@@ -173,12 +202,51 @@ async function runDriftReport(opts) {
   }
 }
 
+async function runDriftReset(opts) {
+  if (!opts.url) {
+    printDriftResetUsage();
+    process.exit(2);
+  }
+
+  if (typeof fetch !== 'function') {
+    console.error('Error: global fetch() is not available. doctreen CLI requires Node 18+.');
+    process.exit(2);
+  }
+
+  const baseUrl = opts.url.endsWith('/drift/reset') ? opts.url : opts.url.replace(/\/+$/, '') + '/drift/reset';
+  const headers = { accept: 'application/json' };
+  if (opts.token) headers['x-doctreen-drift-token'] = opts.token;
+
+  let res;
+  try {
+    res = await fetch(baseUrl, { method: 'POST', headers: headers });
+  } catch (err) {
+    console.error('Error: ' + err.message);
+    process.exit(2);
+  }
+
+  const body = await res.json().catch(function () { return null; });
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(body || { ok: res.ok }, null, 2) + '\n');
+  } else if (res.ok && body && body.ok) {
+    process.stdout.write('Drift store cleared at ' + new Date(body.clearedAt).toISOString() + '\n');
+  } else {
+    process.stderr.write('Reset failed: ' + res.status + ' ' + (body && body.error || res.statusText) + '\n');
+  }
+
+  if (!res.ok || !body || !body.ok) process.exit(1);
+}
+
 async function main() {
   const parsed = parseArgs(process.argv);
   switch (parsed.command) {
     case 'help': printRootUsage(); process.exit(parsed.error ? 2 : 0); break;
-    case 'drift-help': printDriftUsage(); process.exit(parsed.error ? 2 : 0); break;
+    case 'drift-help': printRootUsage(); process.exit(parsed.error ? 2 : 0); break;
+    case 'drift-report-help': printDriftReportUsage(); process.exit(parsed.error ? 2 : 0); break;
+    case 'drift-reset-help': printDriftResetUsage(); process.exit(parsed.error ? 2 : 0); break;
     case 'drift-report': await runDriftReport(parsed.opts); break;
+    case 'drift-reset': await runDriftReset(parsed.opts); break;
     default: printRootUsage(); process.exit(2);
   }
 }

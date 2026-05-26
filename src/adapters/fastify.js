@@ -15,7 +15,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
-const { createDriftPipeline } = require('../internal/drift');
+const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 /**
@@ -299,6 +299,17 @@ function fastifyAdapter(fastify, userConfig) {
       ? await Promise.resolve(config._drift.report())
       : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
     reply.header('Content-Type', 'application/json; charset=utf-8').send(report);
+  });
+
+  // Reset the in-memory drift store (v1.10.1+). Gated by `drift.allowReset`.
+  fastify.post(config.docsPath + '/drift/reset', async function resetDrift(req, reply) {
+    const auth = authorizeReset(config._drift, req.headers || {}, req.query || {});
+    if (!auth.ok) {
+      reply.code(auth.status).header('Content-Type', 'application/json; charset=utf-8').send({ ok: false, error: auth.error });
+      return;
+    }
+    await Promise.resolve(config._drift.reset());
+    reply.code(200).header('Content-Type', 'application/json; charset=utf-8').send({ ok: true, clearedAt: Date.now() });
   });
 
   fastify.post(config.docsPath + '/__flows/run', async function runDocsFlow(req, reply) {

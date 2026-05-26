@@ -130,11 +130,48 @@ function createDriftPipeline(config) {
     report: function () { return store.report(); },
     reset: function () { return store.reset(); },
     store: store,
+    config: driftCfg,
   };
+}
+
+/**
+ * Authorise an incoming `POST /drift/reset` request. Returns `{ ok: true }`
+ * when the reset should proceed, or `{ ok: false, status, error }` describing
+ * the rejection. Centralised so every adapter applies the same policy:
+ *
+ *   - drift disabled       → 404 (endpoint never registered, but defensive)
+ *   - allowReset !== true  → 405
+ *   - resetToken set but   → 401
+ *     header/query missing
+ *     or mismatched
+ *
+ * @param {object} pipeline      - The pipeline returned by createDriftPipeline.
+ * @param {object} headers       - Incoming request headers (lowercase keys).
+ * @param {object} [query]       - Parsed query string.
+ * @returns {{ ok: true } | { ok: false, status: number, error: string }}
+ */
+function authorizeReset(pipeline, headers, query) {
+  if (!pipeline || !pipeline.enabled) {
+    return { ok: false, status: 404, error: 'drift detection disabled' };
+  }
+  const cfg = pipeline.config || {};
+  if (cfg.allowReset !== true) {
+    return { ok: false, status: 405, error: 'drift.allowReset is not enabled' };
+  }
+  if (cfg.resetToken) {
+    const headerToken = headers && (headers['x-doctreen-drift-token'] || headers['X-Doctreen-Drift-Token']);
+    const queryToken = query && query.token;
+    const provided = headerToken || queryToken;
+    if (!provided || String(provided) !== String(cfg.resetToken)) {
+      return { ok: false, status: 401, error: 'invalid reset token' };
+    }
+  }
+  return { ok: true };
 }
 
 module.exports = {
   diffShape: diffShape,
   createDriftPipeline: createDriftPipeline,
+  authorizeReset: authorizeReset,
   _resetDriftCache: _resetWarnDedup,
 };

@@ -5,7 +5,7 @@
 [**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.10.0** &nbsp;—&nbsp; **Production-grade schema drift detection.** The experimental v1.5 `console.warn` is now a structured pipeline with an in-memory aggregator, per-route counters and hourly buckets, opt-in sampling (default 1%), a pluggable store interface… **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.10.0)**
+> **What's new in v1.10.1** &nbsp;—&nbsp; **Drift store reset endpoint.** `POST <docsPath>/drift/reset` clears the in-memory store on demand — useful between integration test runs, after deploys, or when a known bad client has finished its run. **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.10.1)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder), and it generates an interactive docs UI, runnable integration flows, and Postman exports for **Express, Fastify, Hono, Koa, and NestJS** — no router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
@@ -673,9 +673,66 @@ npx doctreen drift report --url http://localhost:3000/docs --fail-on-mismatch
 
 `--json` prints the raw payload; `--route /users` filters by path substring; `--min-issues 5` only fails when the total crosses a threshold.
 
+### Resetting the store
+
+By default the in-memory drift store persists until process restart. Opt in to a reset endpoint when you want to clear between integration runs, after a deploy, or once a misbehaving client has been fixed:
+
+```js
+expressAdapter(app, {
+  drift: {
+    enabled: true,
+    allowReset: true,
+    resetToken: process.env.DOCTREEN_RESET_TOKEN, // optional but recommended
+  },
+});
+```
+
+```bash
+# CI / cron / one-off
+npx doctreen drift reset --url http://localhost:3000/docs --token "$DOCTREEN_RESET_TOKEN"
+
+# Or directly
+curl -X POST -H "x-doctreen-drift-token: $TOKEN" http://localhost:3000/docs/drift/reset
+```
+
+Without `resetToken` the endpoint is open — only enable that on internal-only networks. Without `allowReset: true` the endpoint returns `405` regardless.
+
+### Daily and hourly buckets
+
+Each entry in `/drift.json` includes both `buckets` (rolling 24 hourly counts, keys like `2026-05-27T14`) and `dailyBuckets` (rolling 7 daily counts, keys like `2026-05-27`). Same sampling, no extra cost — pick whichever resolution suits your dashboard.
+
 ### Pluggable storage
 
-The default in-memory store is fine for single-process apps. For multi-replica or long-running deployments, implement the `DriftStore` interface (`record(event)`, `report()`, `reset()`) — a Redis-backed example will ship alongside the v1.11 release.
+The default in-memory store is fine for single-process apps. For multi-replica or long-running deployments, swap in an external store. The `DriftStore` interface is minimal:
+
+```ts
+interface DriftStore {
+  record(event: DriftEvent): void | Promise<void>;
+  report(): DriftReport | Promise<DriftReport>;
+  reset(): void | Promise<void>;
+}
+```
+
+A complete Redis-backed reference implementation ships at [`example/drift-redis-store.js`](./example/drift-redis-store.js) (BYO `ioredis` / `redis@4+`):
+
+```js
+const Redis = require('ioredis');
+const { createRedisDriftStore } = require('doctreen/example/drift-redis-store');
+
+const redis = new Redis(process.env.REDIS_URL);
+
+expressAdapter(app, {
+  drift: {
+    enabled: true,
+    sampleRate: 0.01,
+    store: createRedisDriftStore({ client: redis, prefix: 'doctreen:drift:' }),
+    allowReset: true,
+    resetToken: process.env.DOCTREEN_RESET_TOKEN,
+  },
+});
+```
+
+The Redis store survives restarts and lets multiple replicas share a single aggregated view.
 
 ---
 
