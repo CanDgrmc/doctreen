@@ -1974,13 +1974,11 @@ function serveDocsUI(routes, config, options) {
       border-color: rgba(72,187,120,0.3);
     }
 
-    /* ── Export to Postman button ──────────────────────────────────────────── */
-    .export-postman-btn {
+    /* ── Export buttons (Postman, OpenAPI) ─────────────────────────────────── */
+    .export-postman-btn,
+    .export-openapi-btn {
       padding: 5px 14px;
       border-radius: 5px;
-      border: 1px solid rgba(255,110,90,0.35);
-      background: rgba(255,110,90,0.08);
-      color: #ff6e5a;
       font-size: 0.72rem;
       font-weight: 600;
       cursor: pointer;
@@ -1988,10 +1986,25 @@ function serveDocsUI(routes, config, options) {
       font-family: inherit;
       letter-spacing: 0.02em;
     }
+    .export-postman-btn {
+      border: 1px solid rgba(255,110,90,0.35);
+      background: rgba(255,110,90,0.08);
+      color: #ff6e5a;
+    }
     .export-postman-btn:hover {
       background: rgba(255,110,90,0.16);
       border-color: rgba(255,110,90,0.5);
       color: #ff8a78;
+    }
+    .export-openapi-btn {
+      border: 1px solid rgba(85,180,255,0.35);
+      background: rgba(85,180,255,0.08);
+      color: #55b4ff;
+    }
+    .export-openapi-btn:hover {
+      background: rgba(85,180,255,0.16);
+      border-color: rgba(85,180,255,0.5);
+      color: #7cc4ff;
     }
 
     /* ── Empty states ────────────────────────────────────────────────────────── */
@@ -2027,6 +2040,7 @@ function serveDocsUI(routes, config, options) {
       <span class="badge badge-count">${totalRoutes} route${totalRoutes !== 1 ? 's' : ''}</span>
       ${totalFlows > 0 ? `<span class="badge badge-count">${totalFlows} flow${totalFlows !== 1 ? 's' : ''}</span>` : ''}
       ${liveCount > 0 ? `<span class="badge badge-live">${liveCount} with schemas</span>` : ''}
+      <button id="export-openapi-btn" class="export-openapi-btn">Export to OpenAPI 3.1</button>
       <button id="export-postman-btn" class="export-postman-btn">Export to Postman</button>
     </div>
   </div>
@@ -2088,6 +2102,7 @@ function serveDocsUI(routes, config, options) {
   var FLOWS = ${JSON.stringify(flows)};
   var META   = ${JSON.stringify({ title: meta.title, version: meta.version, description: meta.description })};
   var FLOW_RUN_ENDPOINT = ${JSON.stringify(config.docsPath + '/__flows/run')};
+  var OPENAPI_ENDPOINT  = ${JSON.stringify(config.docsPath + '/openapi.json')};
   var CLIENT_METHOD_CLASSES = ${JSON.stringify(Object.keys(METHOD_STYLES).reduce(function (acc, key) {
     acc[key] = METHOD_STYLES[key].cls;
     return acc;
@@ -2709,6 +2724,39 @@ function serveDocsUI(routes, config, options) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  });
+
+  // ── Export to OpenAPI 3.1 ──────────────────────────────────────────────────
+  // Fetches the server-rendered spec from /docs/openapi.json rather than
+  // duplicating the conversion logic on the client. Triggers a JSON download.
+  document.getElementById('export-openapi-btn').addEventListener('click', function () {
+    var btn = this;
+    var originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Exporting…';
+    fetch(OPENAPI_ENDPOINT, { headers: { Accept: 'application/json' } })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (doc) {
+        var blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+        var url  = URL.createObjectURL(blob);
+        var a    = document.createElement('a');
+        a.href = url;
+        a.download = (META.title || 'api').replace(/[^a-zA-Z0-9_-]/g, '_') + '_openapi.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch(function (err) {
+        alert('OpenAPI export failed: ' + err.message);
+      })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      });
   });
 
   function fallbackCopy(text, cb) {
