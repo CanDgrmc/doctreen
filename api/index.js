@@ -14,7 +14,7 @@
 
 const express = require('express');
 const { z } = require('zod');
-const { expressAdapter, defineRoute } = require('../src/adapters/express');
+const { expressAdapter, defineRoute } = require('doctreen/express');
 
 const app = express();
 app.use(express.json());

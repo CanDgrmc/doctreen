@@ -1,0 +1,15 @@
+{
+  "name": "doctreen-demo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Vercel deployment target for the DocTreen live demo. Not published to npm.",
+  "main": "index.js",
+  "dependencies": {
+    "express": "^4.18.0",
+    "zod": "^3.22.0",
+    "doctreen": "file:.."
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
