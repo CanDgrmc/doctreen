@@ -2,6 +2,8 @@
 
 **One Zod schema per route. Get docs, integration tests, and runtime schema drift detection. No OpenAPI YAML.**
 
+[**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
+
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder), and it generates an interactive docs UI, runnable integration flows, and Postman exports for **Express, Fastify, Hono, Koa, and NestJS** — no router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
 
 ![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/ss-1.png)
