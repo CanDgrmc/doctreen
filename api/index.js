@@ -9,6 +9,8 @@
  *   - nested express.Router() introspection
  *   - bundled flows (Flow Creator + saved flows visible in the UI)
  *   - OpenAPI 3.1 export at /docs/openapi.json (v1.7)
+ *   - securitySchemes + per-route security + Authorization auto-strip (v1.8)
+ *   - hidden: true to keep internal routes out of docs / OpenAPI (v1.8)
  *
  * Deploy with `vercel --prod`. All paths route to this single function;
  * Vercel auto-detects /api/index.js without a builds config.
@@ -246,6 +248,7 @@ app.post('/auth/login', defineRoute(
   }),
   {
     description: 'Authenticate with email + password. Returns a JWT pair.',
+    security: [],                         // explicit public override (v1.8)
     request:  { body: LoginBody },
     response: TokenPair,
     headers:  { ...JSON_HEADER },
@@ -260,6 +263,7 @@ app.post('/auth/refresh', defineRoute(
   (_req, res) => res.json({ token: 'eyJhbGciOiJIUzI1NiJ9.demo-refreshed', expiresIn: 3600 }),
   {
     description: 'Exchange a refresh token for a new access token.',
+    security: [],                         // public — uses refreshToken from body (v1.8)
     request:  { body: RefreshBody },
     response: z.object({ token: z.string(), expiresIn: z.number() }),
     headers:  { ...JSON_HEADER },
@@ -286,6 +290,7 @@ admin.get('/stats', defineRoute(
   (_req, res) => res.json({ totalUsers: 1024, activeUsers: 876, totalProducts: 312, ordersToday: 47, revenue: 9823.50 }),
   {
     description: 'Platform-wide statistics snapshot.',
+    security: [{ adminAuth: [] }],         // override: require the admin-role scheme (v1.8)
     response: z.object({
       totalUsers:    z.number(),
       activeUsers:   z.number(),
@@ -301,9 +306,20 @@ admin.delete('/users/:id', defineRoute(
   (req, res) => res.json({ deleted: true, userId: Number(req.params.id), deletedAt: new Date().toISOString() }),
   {
     description: 'Permanently delete a user account (admin only).',
+    security: [{ adminAuth: [] }],
     response: z.object({ deleted: z.boolean(), userId: z.number(), deletedAt: z.string() }),
     headers:  { Authorization: 'Bearer <admin-token>' },
     errors:   { 403: { description: 'Admin role required', schema: Error4xx } },
+  }
+));
+
+// Internal-only health probe — serves traffic for monitors but is hidden
+// from the docs UI and the OpenAPI export entirely (v1.8 hidden flag).
+admin.get('/internal-health', defineRoute(
+  (_req, res) => res.json({ ok: true, ts: Date.now() }),
+  {
+    description: 'Should never appear in /docs or /docs/openapi.json',
+    hidden:      true,
   }
 ));
 
@@ -422,10 +438,39 @@ app.use(expressAdapter(app, {
   flows,
   meta: {
     title:       'DocTreen Demo API',
-    version:     '1.7.0',
-    description: 'Live demo — Zod-first schemas, runtime validation, header auth, nested routers, saved flows, and OpenAPI 3.1 export at /docs/openapi.json. Try POSTing {} to /users to see the 422 validation response.',
+    version:     '1.8.0',
+    description:
+      'Live demo — Zod-first schemas, runtime validation, OpenAPI 3.1 export with proper security schemes, ' +
+      'per-route security overrides, hidden-from-docs flag, header auth, nested routers, and saved flows. ' +
+      'Try POSTing {} to /users to see the v1.6 422 validation response, or hit /docs/openapi.json to ' +
+      'inspect the v1.8 spec with components.securitySchemes wired up.',
   },
   exclude: ['/health'],
+
+  // ── OpenAPI 3.1 configuration (v1.7 / v1.8) ──────────────────────────────
+  openapi: {
+    servers: [
+      { url: 'https://doctreen.vercel.app', description: 'Production demo' },
+      { url: '/',                            description: 'Same-origin (Swagger UI Try-it-out)' },
+    ],
+    securitySchemes: {
+      bearerAuth: {
+        type:         'http',
+        scheme:       'bearer',
+        bearerFormat: 'JWT',
+        description:  'Standard user token returned by POST /auth/login',
+      },
+      adminAuth: {
+        type:         'http',
+        scheme:       'bearer',
+        bearerFormat: 'JWT',
+        description:  'Token with admin role — required for /admin/* routes',
+      },
+    },
+    // Global default — applies to every route that does not declare its own.
+    // /auth/login + /auth/refresh override with `security: []` (public).
+    security: [{ bearerAuth: [] }],
+  },
 }));
 
 // Root → /docs for convenience
