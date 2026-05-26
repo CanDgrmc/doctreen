@@ -6,6 +6,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = requi
 const { serveDocsUI } = require('../ui/index');
 const { convertSchema, normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { buildOpenApiDocument } = require('../exporters/openapi');
 
 /** Duck-type check for "this is a Zod schema instance". */
 function isZodInstance(v) {
@@ -385,6 +386,10 @@ function nestAdapter(app, userConfig) {
       const html = serveDocsUI(getRegistry().getAll(), config);
       reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
     });
+    httpAdapter.get(config.docsPath + '/openapi.json', function (req, reply) {
+      const doc = buildOpenApiDocument(getRegistry().getAll(), config);
+      reply.header('Content-Type', 'application/json; charset=utf-8').send(doc);
+    });
   } else {
     // Express (default platform) and any other adapter that uses Node's
     // IncomingMessage / ServerResponse signature.
@@ -392,6 +397,11 @@ function nestAdapter(app, userConfig) {
       const html = serveDocsUI(getRegistry().getAll(), config);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.send(html);
+    });
+    httpAdapter.get(config.docsPath + '/openapi.json', function (req, res) {
+      const doc = buildOpenApiDocument(getRegistry().getAll(), config);
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.send(JSON.stringify(doc, null, 2));
     });
   }
 

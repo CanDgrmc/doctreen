@@ -15,6 +15,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { buildOpenApiDocument } = require('../exporters/openapi');
 
 /**
  * normalizeErrors
@@ -254,6 +255,12 @@ function fastifyAdapter(fastify, userConfig) {
   fastify.get(config.docsPath, function serveDocs(_req, reply) {
     const html = serveDocsUI(registry.getAll(), config, { flows: getUiFlows(config) });
     reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+  });
+
+  // Serve the OpenAPI 3.1 document (v1.7+)
+  fastify.get(config.docsPath + '/openapi.json', function serveOpenApi(_req, reply) {
+    const doc = buildOpenApiDocument(registry.getAll(), config);
+    reply.header('Content-Type', 'application/json; charset=utf-8').send(doc);
   });
 
   fastify.post(config.docsPath + '/__flows/run', async function runDocsFlow(req, reply) {
