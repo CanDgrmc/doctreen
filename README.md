@@ -27,6 +27,8 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 
 - An interactive docs UI at `/docs` — zero-dependency HTML, served by the same Node process
 - **OpenAPI 3.1 export** at `/docs/openapi.json` and a one-click download button — drop the file into Scalar, Redoc, Swagger UI, or any spec-driven tool
+- **`securitySchemes` + per-route `security`** *(v1.8)* — declare auth schemes once, attach them automatically; the spec passes Redocly's `security-defined` rule cleanly
+- **`hidden: true` per route** *(v1.8)* — keep internal endpoints serving traffic but invisible to docs / OpenAPI consumers
 - Runnable integration flows with a CLI runner suitable for CI
 - Postman Collection v2.1 export
 - **Runtime validation** — opt in with `validate: true` and invalid requests are rejected with a structured 422 before they reach your handler. Same schema as the docs.
@@ -43,6 +45,8 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 | Integration test runner  | Built-in flows     | No                | No                | No               |
 | Postman export           | Yes                | No                | No                | No               |
 | OpenAPI 3.1 export       | Yes (built-in)     | Yes               | Required          | Plugin           |
+| `securitySchemes` + per-route `security` | Yes (v1.8) | Manual          | Spec input        | Manual           |
+| Hide a route from docs   | Per route + path patterns | No         | Spec edit         | No               |
 | Setup time               | ~5 min             | ~30 min           | ~1 hour           | Refactor router  |
 
 ---
@@ -511,7 +515,66 @@ Drop the file (or paste it) into [Scalar](https://docs.scalar.com/), [Redoc](htt
 - `callbacks`, `webhooks`, `links`
 - `$ref`-based schema deduplication (everything is inlined; a few KB heavier but renders identically in every viewer)
 
-If you want to point a CI step at it:
+### Configuring servers, security schemes, and per-route security (v1.8+)
+
+Point the spec at real environments and declare auth schemes once — DocTreen will attach the right `security` block to each operation and strip the redundant `Authorization` header parameter:
+
+```js
+expressAdapter(app, {
+  openapi: {
+    servers: [
+      { url: 'https://api.example.com',         description: 'Production' },
+      { url: 'https://staging.api.example.com', description: 'Staging' },
+    ],
+    securitySchemes: {
+      bearerAuth: { type: 'http',   scheme: 'bearer', bearerFormat: 'JWT' },
+      apiKey:     { type: 'apiKey', in: 'header',     name: 'x-api-key' },
+    },
+    security: [{ bearerAuth: [] }],   // global default — applies to every operation
+  },
+});
+```
+
+Per-route overrides:
+
+```js
+// Override with a different scheme
+app.get('/admin/stats', defineRoute(handler, {
+  security: [{ adminAuth: [] }],
+  // ...
+}));
+
+// Mark this route explicitly public, ignoring the global default
+app.post('/auth/login', defineRoute(handler, {
+  security: [],
+  // ...
+}));
+```
+
+When a route has any effective `security` requirement (per-route or inherited), DocTreen automatically strips the `Authorization` header from `parameters[]` — the security scheme is the single source of truth, and Redocly's `security-defined` rule passes cleanly.
+
+### Hide a route from the docs (v1.8+)
+
+Some endpoints serve traffic but should not appear in the docs UI or the OpenAPI export — internal admin tools, experimental features, deprecated routes you can't remove yet. Mark them per-route:
+
+```js
+app.get('/internal/metrics', defineRoute(handler, {
+  hidden: true,           // removed from docs UI and openapi.json — still serves 200s
+  description: 'Internal metrics endpoint',
+}));
+```
+
+```ts
+// NestJS — full bag
+@Get('flags') @DocRoute({ hidden: true }) flags() { ... }
+
+// NestJS — shorthand decorator
+@Get('flags') @DocHidden() flags() { ... }
+```
+
+Hidden routes are filtered out by `RouteRegistry.getVisible()` (used by both the docs UI and the OpenAPI exporter), so the runtime route remains fully reachable.
+
+### CI hooks
 
 ```bash
 npx @redocly/cli lint https://your-api.example.com/docs/openapi.json
@@ -1115,7 +1178,7 @@ npm run example:nest        # NestJS TS      → http://localhost:3001/docs
 
 - [x] **Runtime validation middleware** *(v1.6)* — Zod schemas validate incoming requests; 422 on mismatch.
 - [x] **OpenAPI 3.1 export** *(v1.7)* — same schema bag now also drives Scalar, Redoc, and Swagger UI via `GET /docs/openapi.json`.
-- [ ] **`openapi.servers` config + `securitySchemes`** — declare auth schemes once, attach to operations automatically. Replaces the v1.7 fallback that exposes `Authorization` as a plain header parameter.
+- [x] **`openapi.servers` + `securitySchemes` + per-route `security` + `hidden`** *(v1.8)* — declare auth schemes once, attach to operations automatically; `Authorization` header auto-stripped; routes can opt out of docs entirely.
 - [ ] **Schema drift detection — production grade** — sampling, aggregation, and a dashboard view of declared vs. observed schemas. Extension of the v1.5 experimental dev warning.
 - [ ] **Drift hooks on Fastify, Hono, Koa, NestJS** — port the v1.5 Express drift check to every adapter now that the validation rails exist.
 - [ ] **`doctreen init` CLI** — scaffold a `doctreen-flows/` directory with an example flow and a CI-ready runner config.
