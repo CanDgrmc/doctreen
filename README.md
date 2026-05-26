@@ -26,6 +26,7 @@ Most API doc tools force you to pick one of three trade-offs:
 DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (or `@DocRoute` on NestJS) once, and you get:
 
 - An interactive docs UI at `/docs` — zero-dependency HTML, served by the same Node process
+- **OpenAPI 3.1 export** at `/docs/openapi.json` and a one-click download button — drop the file into Scalar, Redoc, Swagger UI, or any spec-driven tool
 - Runnable integration flows with a CLI runner suitable for CI
 - Postman Collection v2.1 export
 - **Runtime validation** — opt in with `validate: true` and invalid requests are rejected with a structured 422 before they reach your handler. Same schema as the docs.
@@ -41,7 +42,7 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 | Runtime request validation | Yes (one schema)  | Via class-validator | No (spec-only)  | Yes              |
 | Integration test runner  | Built-in flows     | No                | No                | No               |
 | Postman export           | Yes                | No                | No                | No               |
-| OpenAPI 3.1 export       | Coming v1.7        | Yes               | Required          | Plugin           |
+| OpenAPI 3.1 export       | Yes (built-in)     | Yes               | Required          | Plugin           |
 | Setup time               | ~5 min             | ~30 min           | ~1 hour           | Refactor router  |
 
 ---
@@ -54,6 +55,7 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 - [NestJS — Decorator API](#nestjs--decorator-api)
 - [Zod Support](#zod-support)
 - [Runtime Validation](#runtime-validation)
+- [OpenAPI Export](#openapi-export)
 - [Schema Drift Detection (experimental)](#schema-drift-detection-experimental)
 - [Request Flows](#request-flows)
 - [Documenting Routes with JSDoc](#documenting-routes-with-jsdoc)
@@ -481,6 +483,40 @@ Content-Type: application/json
 - **All five adapters.** Express, Fastify, Hono, Koa, and NestJS all support `validate: true`. Hono and Koa require the adapter to be called **before** routes (their middleware does not retro-apply); Express, Fastify, and NestJS work regardless of order.
 
 If you previously hand-rolled a NestJS pipe or an Express middleware that ran `zodSchema.parse(req.body)` for every endpoint, this replaces it.
+
+---
+
+## OpenAPI Export
+
+Every adapter serves an [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document at `<docsPath>/openapi.json` and the docs UI ships with a one-click **Export to OpenAPI 3.1** button next to Export to Postman. The same Zod-or-`s`-builder schemas that drive DocTreen's own UI also drive the spec — no extra annotations, no separate file.
+
+```bash
+# Once the docs UI is running:
+curl https://your-api.example.com/docs/openapi.json > openapi.json
+```
+
+Drop the file (or paste it) into [Scalar](https://docs.scalar.com/), [Redoc](https://redocly.com/redoc/), [Swagger UI](https://swagger.io/tools/swagger-ui/), [editor.swagger.io](https://editor.swagger.io), or any other tool that consumes the spec — it just works.
+
+**What's in the spec:**
+
+- GET / POST / PUT / PATCH / DELETE operations grouped by first path segment as tags
+- Path parameters (`/users/:id` → `/users/{id}`), query parameters from `request.query`, request headers as `parameters[].in = header`
+- JSON request body for POST/PUT/PATCH with `required` arrays derived from the Zod schema
+- 200 / 201 success responses (201 for POST) plus every declared error response with its own schema
+- All schemas inlined so the document is self-contained — no external `$ref` resolution needed
+
+**Out of scope for now (v1.8+):**
+
+- `securitySchemes` / `security` blocks — request-headers like `Authorization` currently render as parameters
+- `callbacks`, `webhooks`, `links`
+- `$ref`-based schema deduplication (everything is inlined; a few KB heavier but renders identically in every viewer)
+
+If you want to point a CI step at it:
+
+```bash
+npx @redocly/cli lint https://your-api.example.com/docs/openapi.json
+npx @apidevtools/swagger-cli validate https://your-api.example.com/docs/openapi.json
+```
 
 ---
 
@@ -1077,8 +1113,9 @@ npm run example:nest        # NestJS TS      → http://localhost:3001/docs
 
 ## Roadmap
 
-- [x] **Runtime validation middleware** *(v1.6)* — Zod schemas validate incoming requests; 422 on mismatch. One schema, two uses today (docs + validation), three with drift detection.
-- [ ] **OpenAPI 3.1 export** — `GET /docs/openapi.json` so the same schema bag drives Scalar, Redoc, and Swagger UI alongside DocTreen's built-in UI. *Next release.*
+- [x] **Runtime validation middleware** *(v1.6)* — Zod schemas validate incoming requests; 422 on mismatch.
+- [x] **OpenAPI 3.1 export** *(v1.7)* — same schema bag now also drives Scalar, Redoc, and Swagger UI via `GET /docs/openapi.json`.
+- [ ] **`openapi.servers` config + `securitySchemes`** — declare auth schemes once, attach to operations automatically. Replaces the v1.7 fallback that exposes `Authorization` as a plain header parameter.
 - [ ] **Schema drift detection — production grade** — sampling, aggregation, and a dashboard view of declared vs. observed schemas. Extension of the v1.5 experimental dev warning.
 - [ ] **Drift hooks on Fastify, Hono, Koa, NestJS** — port the v1.5 Express drift check to every adapter now that the validation rails exist.
 - [ ] **`doctreen init` CLI** — scaffold a `doctreen-flows/` directory with an example flow and a CI-ready runner config.
