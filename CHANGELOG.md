@@ -4,6 +4,91 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] — 2026-05-27
+
+### Added
+
+- **Production-grade schema drift detection.** The experimental v1.5
+  `console.warn` is now a structured pipeline with an in-memory aggregator,
+  per-route counters and hourly buckets, opt-in sampling (default 1%), a
+  pluggable store interface for Redis / Postgres / etc., an `onDrift`
+  callback, and fire-and-forget webhook dispatch. Every adapter
+  (Express, Fastify, Hono, Koa, NestJS) emits events through the same
+  pipeline so behaviour is uniform across frameworks.
+
+  ```js
+  expressAdapter(app, {
+    drift: {
+      enabled: true,
+      sampleRate: 0.05,
+      webhook: 'https://hooks.example.com/drift',
+      onDrift: (event) => metrics.increment('api.drift', event.issues.length),
+    },
+  });
+  ```
+
+  Defaults: enabled when `NODE_ENV !== 'production'`, `sampleRate: 0.01`,
+  `logLevel: 'warn'`. Pass `drift: false` to disable entirely.
+
+- **`GET <docsPath>/drift.json`.** Every adapter exposes an aggregated
+  drift report — totals per route, kind breakdown (`missing-required`,
+  `unexpected-field`, `type-mismatch`), top fields, rolling hourly
+  buckets, and the last N samples per route. The same payload powers
+  the UI tab and the CLI.
+
+- **UI: Drift tab.** A new header tab appears in the docs page when
+  drift is enabled. Shows total issues, routes affected, kind breakdown,
+  and the latest sample per route. Routes with active drift get an
+  inline `DRIFT N` badge in the routes table. The tab fetches
+  `/drift.json` on activation and refreshes manually.
+
+- **CLI: `npx doctreen drift report`.** Umbrella CLI (new `doctreen`
+  binary) that hits the running server's `/drift.json` and prints a
+  CI-friendly summary. `--fail-on-mismatch` exits non-zero when drift
+  is present; `--json` emits the raw payload; `--route <pattern>`
+  filters by path substring.
+
+  ```
+  npx doctreen drift report --url http://localhost:3000/docs --fail-on-mismatch
+  ```
+
+- **`DriftStore` interface.** Plug an external store (Redis, Postgres,
+  external aggregator) by passing `drift.store` — any object with
+  `record(event)`, `report()`, `reset()` works.
+
+### Changed
+
+- The v1.5 experimental drift `console.warn` is now centralised in
+  `src/internal/drift-store.js`. The same log line still fires for
+  the default in-memory store (per unique drift signature, deduped),
+  but it now also feeds the structured pipeline. Pass `drift.logLevel:
+  'silent'` to suppress the log without disabling detection.
+
+- Per-route `requestSchemaDeclared` is now set consistently across all
+  adapters when a schema comes from `defineRoute`, `@DocRoute`, JSDoc,
+  or Fastify native JSON Schema — so drift detection applies
+  uniformly regardless of how the schema was provided.
+
+- Roadmap: v1.10 ticked. Next headline is **OpenAPI polish** (`$ref`
+  dedup, first-class tags, callbacks/webhooks, multi-example, `npx
+  doctreen lint openapi`).
+
+### Migration
+
+No breaking changes. The experimental v1.5 drift detection is fully
+backward compatible — the warning still fires for unique mismatches.
+
+To opt into the new aggregated report and UI in **production**, flip
+the gate:
+
+```js
+expressAdapter(app, { drift: { enabled: true, sampleRate: 0.01 } });
+```
+
+At a 1% sample rate the runtime cost is negligible. The store retains
+24 hours of hourly buckets per route and the most recent 5 samples,
+both configurable.
+
 ## [1.9.0] — 2026-05-26
 
 ### Added

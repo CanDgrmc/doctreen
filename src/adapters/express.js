@@ -31,7 +31,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, inferSchema, parseJSDoc, 
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { diffShape, reportDrift } = require('../internal/drift');
+const { createDriftPipeline } = require('../internal/drift');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -304,14 +304,15 @@ function wrapRouteHandlers(handlerStack, entry, config) {
                 currentEntry.requestSchema.query = inferSchema(reqQuery);
               }
 
-              // ── Schema drift detection (experimental, dev-only) ──────────
-              if (currentEntry.requestSchemaDeclared && process.env.NODE_ENV !== 'production') {
+              // ── Schema drift detection (v1.10+) ──────────────────────────
+              // Pipeline owns enabled-gate, sampling, store, webhook, onDrift.
+              if (currentEntry.requestSchemaDeclared && config._drift && config._drift.enabled) {
                 const route = { method: currentEntry.method, path: currentEntry.path };
                 if (hasBody && currentEntry.requestSchema.body) {
-                  reportDrift(route, 'body', diffShape(currentEntry.requestSchema.body, reqBody));
+                  config._drift.recordIfDrift(route, 'body', currentEntry.requestSchema.body, reqBody);
                 }
                 if (hasQuery && currentEntry.requestSchema.query) {
-                  reportDrift(route, 'query', diffShape(currentEntry.requestSchema.query, reqQuery));
+                  config._drift.recordIfDrift(route, 'query', currentEntry.requestSchema.query, reqQuery);
                 }
               }
             }
@@ -456,6 +457,11 @@ function expressAdapter(app, userConfig = {}) {
     return function docMiddlewareDisabled(_req, _res, next) { next(); };
   }
 
+  // Schema drift pipeline (v1.10+). Owns sampling, in-memory store, webhook,
+  // onDrift hook. Attached to config so walkStack-wrapped handlers can dispatch
+  // events; also surfaced via `GET <docsPath>/drift.json` below.
+  config._drift = createDriftPipeline(config);
+
   // Wrap handlers immediately so traffic arriving before /docs is visited
   // is still captured. setImmediate defers to the next tick so that all
   // app.use()/app.get()/… calls in the same synchronous block complete first.
@@ -487,6 +493,19 @@ function expressAdapter(app, userConfig = {}) {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.statusCode = 200;
       res.end(JSON.stringify(doc, null, 2));
+      return;
+    }
+
+    const driftPath = config.docsPath + '/drift.json';
+    if (req.path === driftPath || req.url === driftPath) {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.statusCode = 200;
+      const report = config._drift && config._drift.enabled
+        ? config._drift.report()
+        : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
+      Promise.resolve(report).then(function (r) {
+        res.end(JSON.stringify(r, null, 2));
+      });
       return;
     }
 
