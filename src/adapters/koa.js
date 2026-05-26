@@ -87,6 +87,7 @@ function seedEntry(entry, handler) {
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
+    if (predef.hidden === true)                                          entry.hidden            = true;
   }
 
   // 2. JSDoc — fallback when any field is still missing
@@ -244,13 +245,13 @@ function koaAdapter(router, userConfig) {
     if (!cachedRegistry || config.liveReload) refreshRegistry();
 
     ctx.type = 'text/html';
-    ctx.body = serveDocsUI(cachedRegistry.getAll(), config, { flows: getUiFlows(config) });
+    ctx.body = serveDocsUI(cachedRegistry.getVisible(), config, { flows: getUiFlows(config) });
   });
 
   router.get(config.docsPath + '/openapi.json', async function serveOpenApi(ctx) {
     if (!cachedRegistry || config.liveReload) refreshRegistry();
     ctx.type = 'application/json';
-    ctx.body = buildOpenApiDocument(cachedRegistry.getAll(), config);
+    ctx.body = buildOpenApiDocument(cachedRegistry.getVisible(), config);
   });
 
   router.post(config.docsPath + '/__flows/run', async function runDocsFlow(ctx) {

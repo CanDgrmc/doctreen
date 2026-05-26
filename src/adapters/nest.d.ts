@@ -41,6 +41,10 @@ export interface NestRouteSchemas {
    * }
    */
   errors?: Record<number, string | { description?: string | null; schema?: SchemaInput | null }>;
+  /** Per-route override for runtime validation (v1.6+). */
+  validate?: boolean;
+  /** Hide this route from the docs UI and the OpenAPI export (v1.8+). */
+  hidden?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,6 +183,20 @@ export declare function DocResponse(response: SchemaInput): MethodDecorator;
 export declare function DocErrors(
   errors: Record<number, string | { description?: string | null; schema?: SchemaInput | null }>
 ): MethodDecorator;
+
+/**
+ * Hide a controller method from the docs UI and the OpenAPI export while
+ * leaving the route fully functional at runtime. Equivalent to
+ * `@DocRoute({ hidden: true })`.
+ *
+ * @example
+ * ```ts
+ * @Get('internal-metrics')
+ * @DocHidden()
+ * metrics() { ... }
+ * ```
+ */
+export declare function DocHidden(): MethodDecorator;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // defineRoute (compat shim)

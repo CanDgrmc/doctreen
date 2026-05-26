@@ -170,6 +170,18 @@ class RouteRegistry {
   }
 
   /**
+   * Same as `getAll()` but omits entries marked `hidden: true` via
+   * `defineRoute({ hidden: true })` / `@DocRoute({ hidden: true })`.
+   * Use this when feeding routes to the docs UI or OpenAPI exporter so
+   * hidden routes remain functional at runtime but invisible to consumers.
+   *
+   * @returns {RouteEntry[]}
+   */
+  getVisible() {
+    return this.getAll().filter(function (r) { return r && r.hidden !== true; });
+  }
+
+  /**
    * Wipe all entries so the next introspection starts fresh.
    */
   clear() {

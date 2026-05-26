@@ -72,6 +72,20 @@ export interface RouteSchemas {
    * }
    */
   errors?: Record<number, string | { description?: string | null; schema?: SchemaInput | null }>;
+  /**
+   * Per-route override for runtime validation (v1.6+). Set `true` to force
+   * validation on for this route when the adapter default is off, or `false`
+   * to skip validation when the adapter default is on. Omit to inherit the
+   * adapter setting.
+   */
+  validate?: boolean;
+  /**
+   * Hide this route from the docs UI and the OpenAPI export (v1.8+). The
+   * route remains fully functional at runtime — only the documentation
+   * surface is affected. Useful for internal / admin / experimental
+   * endpoints that should not be discoverable.
+   */
+  hidden?: boolean;
 }
 
 /**

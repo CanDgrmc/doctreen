@@ -224,6 +224,9 @@ function wrapRouteHandlers(handlerStack, entry, config) {
       if (predef.validate !== undefined) {
         entry.validateOverride = predef.validate;
       }
+      if (predef.hidden === true) {
+        entry.hidden = true;
+      }
     }
 
     // Fallback: parse JSDoc block comment from the handler source.
@@ -477,7 +480,7 @@ function expressAdapter(app, userConfig = {}) {
     const openApiPath = config.docsPath + '/openapi.json';
     if (req.path === openApiPath || req.url === openApiPath) {
       if (config.liveReload) introspectExpressApp(app, registry, config);
-      const doc = buildOpenApiDocument(registry.getAll(), config);
+      const doc = buildOpenApiDocument(registry.getVisible(), config);
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.statusCode = 200;
       res.end(JSON.stringify(doc, null, 2));
@@ -492,7 +495,7 @@ function expressAdapter(app, userConfig = {}) {
       introspectExpressApp(app, registry, config);
     }
 
-    const html = serveDocsUI(registry.getAll(), config, { flows: getUiFlows(config) });
+    const html = serveDocsUI(registry.getVisible(), config, { flows: getUiFlows(config) });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.statusCode = 200;
     res.end(html);
