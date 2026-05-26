@@ -50,7 +50,9 @@
     "example:hono:ts": "npx tsx example/hono-app.ts",
     "example:koa": "node example/koa-app.js",
     "example:koa:ts": "npx tsx example/koa-app.ts",
-    "example:nest": "npx tsx example/nest-app.ts"
+    "example:nest": "npx tsx example/nest-app.ts",
+    "release:callout": "node scripts/update-release-callout.js",
+    "version": "node scripts/update-release-callout.js && git add README.md"
   },
   "keywords": [
     "api",

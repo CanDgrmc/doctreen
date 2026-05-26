@@ -6,14 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.6.1] — 2026-05-26
 
+<!-- whatsnew-skip -->
+
 ### Changed
 
 - README now opens with a "What's new in v1.6.0" callout linking to the
   GitHub release page and `CHANGELOG.md`. The npm package page only
   renders `README.md`, so this is the only way to surface release notes
   for visitors landing on https://www.npmjs.com/package/doctreen.
+- Added `scripts/update-release-callout.js` and a `version` lifecycle
+  hook so subsequent `npm version <bump>` runs regenerate the callout
+  automatically from the CHANGELOG entry being published.
 
-No code changes in this release.
+No user-facing code changes in this release.
 
 ## [1.6.0] — 2026-05-26
 
