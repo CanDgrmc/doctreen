@@ -11,9 +11,14 @@
  *   - OpenAPI 3.1 export at /docs/openapi.json (v1.7)
  *   - securitySchemes + per-route security + Authorization auto-strip (v1.8)
  *   - hidden: true to keep internal routes out of docs / OpenAPI (v1.8)
+ *   - headHtml config injecting Vercel Analytics + Speed Insights (v1.9)
  *
  * Deploy with `vercel --prod`. All paths route to this single function;
  * Vercel auto-detects /api/index.js without a builds config.
+ *
+ * Note: Vercel Analytics + Speed Insights scripts are loaded
+ * unconditionally, but only collect data when the matching products are
+ * enabled on the Vercel dashboard for this project.
  */
 
 'use strict';
@@ -436,9 +441,20 @@ app.use(expressAdapter(app, {
   enabled:  true,
   validate: true,
   flows,
+
+  // ── Vercel Analytics + Speed Insights (v1.9 headHtml) ────────────────────
+  // The /_vercel/* paths are served by Vercel automatically when the matching
+  // products are enabled in the project dashboard. Both scripts are no-ops
+  // on non-Vercel hosts (404 with cached failure), so they're safe to ship.
+  headHtml: [
+    '<script defer src="/_vercel/insights/script.js"></script>',
+    '<script defer src="/_vercel/speed-insights/script.js"></script>',
+    '<meta name="theme-color" content="#0f1117">',
+  ].join('\n  '),
+
   meta: {
     title:       'DocTreen Demo API',
-    version:     '1.8.0',
+    version:     '1.9.0',
     description:
       'Live demo — Zod-first schemas, runtime validation, OpenAPI 3.1 export with proper security schemes, ' +
       'per-route security overrides, hidden-from-docs flag, header auth, nested routers, and saved flows. ' +
