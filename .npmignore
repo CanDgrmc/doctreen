@@ -3,3 +3,6 @@ docs
 example
 api
 vercel.json
+.vercel
+tsconfig.json
+.github

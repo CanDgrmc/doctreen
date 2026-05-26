@@ -1,6 +1,6 @@
 # DocTreen
 
-**One Zod schema per route. Get docs, integration tests, and runtime schema drift detection. No OpenAPI YAML.**
+**One Zod schema per route. Get docs, integration tests, *and* runtime validation. No OpenAPI YAML.**
 
 [**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
 
@@ -24,7 +24,8 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 - An interactive docs UI at `/docs` — zero-dependency HTML, served by the same Node process
 - Runnable integration flows with a CLI runner suitable for CI
 - Postman Collection v2.1 export
-- **Schema Drift Detection (experimental)** — declared schemas are compared against real traffic in development; mismatches log a one-line warning so docs and code stay in sync
+- **Runtime validation** — opt in with `validate: true` and invalid requests are rejected with a structured 422 before they reach your handler. Same schema as the docs.
+- **Schema Drift Detection (experimental)** — declared schemas are also compared against real traffic in development; mismatches log a one-line warning so docs and code stay in sync
 
 ## How DocTreen compares
 
@@ -33,9 +34,10 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 | Spec file required       | No                 | No                | Yes (OpenAPI)     | No               |
 | Frameworks supported     | 5 adapters         | NestJS only       | Any (spec-only)   | Custom router    |
 | Zod schemas accepted directly | Yes (all adapters) | Manual           | Manual            | Yes              |
+| Runtime request validation | Yes (one schema)  | Via class-validator | No (spec-only)  | Yes              |
 | Integration test runner  | Built-in flows     | No                | No                | No               |
 | Postman export           | Yes                | No                | No                | No               |
-| OpenAPI 3.1 export       | Coming v1.6        | Yes               | Required          | Plugin           |
+| OpenAPI 3.1 export       | Coming v1.7        | Yes               | Required          | Plugin           |
 | Setup time               | ~5 min             | ~30 min           | ~1 hour           | Refactor router  |
 
 ---
@@ -47,6 +49,7 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 - [Configuration](#configuration)
 - [NestJS — Decorator API](#nestjs--decorator-api)
 - [Zod Support](#zod-support)
+- [Runtime Validation](#runtime-validation)
 - [Schema Drift Detection (experimental)](#schema-drift-detection-experimental)
 - [Request Flows](#request-flows)
 - [Documenting Routes with JSDoc](#documenting-routes-with-jsdoc)
@@ -424,6 +427,56 @@ const node = zodToSchemaNode(schema);
 | `z.intersection(A, B)` | merged `object` properties |
 | `z.lazy(...)` | resolved recursively |
 | `.transform()`, `.pipe()` | unwraps to input schema |
+
+---
+
+## Runtime Validation
+
+The same Zod schema you declared for documentation can validate every incoming request. Enable it once at the adapter level and DocTreen runs `safeParseAsync` against `request.body` and `request.query` before your handler executes. Invalid requests are rejected with a structured 422 response.
+
+```js
+const express = require('express');
+const { z } = require('zod');
+const { expressAdapter, defineRoute } = require('doctreen/express');
+
+const app = express();
+app.use(express.json());
+
+app.post('/users', defineRoute(
+  (req, res) => res.status(201).json({ id: 1, ...req.body }),
+  {
+    request: { body: z.object({ name: z.string().min(2), email: z.string().email() }) },
+  }
+));
+
+// Turn validation on for every Zod-declared route on this app
+app.use(expressAdapter(app, { validate: true }));
+```
+
+Sending `{ "email": "nope" }` to `POST /users` now returns:
+
+```http
+HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "validation_failed",
+  "issues": [
+    { "path": "body.name",  "message": "Required",           "code": "invalid_type"   },
+    { "path": "body.email", "message": "Invalid email",      "code": "invalid_string" }
+  ]
+}
+```
+
+**Properties:**
+
+- **Opt-in.** Default is off; you set `validate: true` once per adapter. Upgrading from v1.5 cannot suddenly start rejecting requests.
+- **Per-route override.** Pass `validate: false` to `defineRoute` (or `@DocRoute`) to skip validation on a specific route while keeping the docs entry. Pass `validate: true` to enable validation on one route when the adapter default is off.
+- **Async refinements work** — internally uses `safeParseAsync`, so `.refine(async ...)` and pipelines are honoured.
+- **Zod only.** Schemas built with the `s.*` helper are descriptive shapes, not parsers, so they cannot be used to validate. Mixed routes (some Zod, some `s.*`) work fine — only the Zod ones validate, others pass through.
+- **All five adapters.** Express, Fastify, Hono, Koa, and NestJS all support `validate: true`. Hono and Koa require the adapter to be called **before** routes (their middleware does not retro-apply); Express, Fastify, and NestJS work regardless of order.
+
+If you previously hand-rolled a NestJS pipe or an Express middleware that ran `zodSchema.parse(req.body)` for every endpoint, this replaces it.
 
 ---
 
@@ -1020,10 +1073,10 @@ npm run example:nest        # NestJS TS      → http://localhost:3001/docs
 
 ## Roadmap
 
+- [x] **Runtime validation middleware** *(v1.6)* — Zod schemas validate incoming requests; 422 on mismatch. One schema, two uses today (docs + validation), three with drift detection.
 - [ ] **OpenAPI 3.1 export** — `GET /docs/openapi.json` so the same schema bag drives Scalar, Redoc, and Swagger UI alongside DocTreen's built-in UI. *Next release.*
-- [ ] **Runtime validation middleware** — opt into Zod `.parse()` on the same schema you declared for docs. One schema, three uses: docs, validation, drift detection.
 - [ ] **Schema drift detection — production grade** — sampling, aggregation, and a dashboard view of declared vs. observed schemas. Extension of the v1.5 experimental dev warning.
-- [ ] **Drift hooks on Fastify, Hono, Koa, NestJS** — port the v1.5 Express drift check to every adapter.
+- [ ] **Drift hooks on Fastify, Hono, Koa, NestJS** — port the v1.5 Express drift check to every adapter now that the validation rails exist.
 - [ ] **`doctreen init` CLI** — scaffold a `doctreen-flows/` directory with an example flow and a CI-ready runner config.
 - [ ] **DocTreen Cloud** — hosted docs portal with versioning, custom domains, and CI flow monitoring (private beta).
 - [ ] **Python (FastAPI) and Go (chi / gin) adapters** — long-term, after the Node story is fully baked.

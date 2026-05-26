@@ -85,10 +85,11 @@ app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }
 app.use(expressAdapter(app, {
   docsPath: '/docs',
   enabled: true,
+  validate: true,                    // v1.6: invalid requests get 422 before the handler
   meta: {
     title: 'DocTreen Demo API',
-    version: '1.5.0',
-    description: 'Live demo — every endpoint declared with a Zod schema. Visit /docs.',
+    version: '1.6.0',
+    description: 'Live demo — every endpoint declared with a Zod schema. POST /users with a missing field to see runtime validation. Visit /docs.',
   },
 }));
 

@@ -4,6 +4,60 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-05-26
+
+### Added
+
+- **Runtime validation middleware.** The Zod schema declared via
+  `defineRoute` / `@DocRoute` now optionally validates each incoming
+  request before the handler executes. Invalid payloads short-circuit
+  with a structured 422 response:
+  ```
+  { "error": "validation_failed", "issues": [{ path, message, code }, …] }
+  ```
+  Enable it once per adapter: `expressAdapter(app, { validate: true })`.
+  Per-route override via `defineRoute({ validate: false })` or
+  `defineRoute({ validate: true })`. Async refinements work via
+  `safeParseAsync`. Available on all five adapters (Express, Fastify,
+  Hono, Koa, NestJS).
+- `RouteRegistry.find(method, path)` for exact-pattern lookup and
+  `RouteRegistry.findByRequestPath(method, actualPath)` for concrete
+  URL lookup with `:param` matching — used by the request-time validation
+  hooks on Hono, Koa, and NestJS.
+- `src/internal/validate.js` — the shared Zod safeParseAsync runner,
+  issue formatter, and `shouldValidate(adapterDefault, perRouteOverride)`
+  resolver.
+- Top-level `tsconfig.json` so `npx tsx` runs the NestJS example with
+  experimentalDecorators + emitDecoratorMetadata enabled.
+
+### Changed
+
+- **Positioning sharpened.** The tagline now reads *"One Zod schema per
+  route. Get docs, integration tests, **and** runtime validation. No
+  OpenAPI YAML."* The comparison table gained a "Runtime request
+  validation" row.
+- `normalizeRouteSchemas` keeps original Zod schemas in an internal
+  `validators` slot alongside the SchemaNode conversion so runtime
+  validation can call `.safeParseAsync` against the exact schema the
+  user defined — refinements, custom messages, async checks all
+  survive.
+- Roadmap reshuffled: runtime validation now ticked off; OpenAPI 3.1
+  export and drift-on-remaining-adapters are the next big items.
+- Live demo (`api/index.js`) now opts in with `validate: true` so the
+  live UI demonstrates the v1.6 feature end-to-end.
+- `package.json` description and keywords mention `validation` and
+  `request-validation`.
+
+### Migration
+
+No breaking changes — validation is opt-in. Existing code with no
+`validate: true` flag continues to behave exactly as in v1.5.
+
+If you were hand-rolling a NestJS pipe or Express middleware that ran
+`zodSchema.parse(req.body)` for every endpoint, you can replace it with
+the adapter flag plus your existing `defineRoute` / `@DocRoute`
+declarations.
+
 ## [1.5.0] — 2026-05-26
 
 ### Added
