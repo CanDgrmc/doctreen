@@ -15,7 +15,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
-const { createDriftPipeline } = require('../internal/drift');
+const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 // Only document these HTTP methods — skip HEAD, OPTIONS (auto-added by @koa/router for GET routes)
@@ -290,6 +290,19 @@ function koaAdapter(router, userConfig) {
     ctx.body = config._drift.enabled
       ? await Promise.resolve(config._drift.report())
       : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
+  });
+
+  router.post(config.docsPath + '/drift/reset', async function resetDrift(ctx) {
+    const auth = authorizeReset(config._drift, ctx.headers || {}, ctx.query || {});
+    ctx.type = 'application/json';
+    if (!auth.ok) {
+      ctx.status = auth.status;
+      ctx.body = { ok: false, error: auth.error };
+      return;
+    }
+    await Promise.resolve(config._drift.reset());
+    ctx.status = 200;
+    ctx.body = { ok: true, clearedAt: Date.now() };
   });
 
   router.post(config.docsPath + '/__flows/run', async function runDocsFlow(ctx) {

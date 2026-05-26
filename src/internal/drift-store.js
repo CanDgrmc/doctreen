@@ -99,21 +99,37 @@ function createMemoryStore(config) {
     return route.method + ' ' + route.path;
   }
 
-  function bucketKey(sampledAt) {
+  function hourBucketKey(sampledAt) {
     // Hour bucket in UTC. e.g. '2026-05-27T14'
     const d = new Date(sampledAt);
     const pad = function (n) { return n < 10 ? '0' + n : '' + n; };
     return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) + 'T' + pad(d.getUTCHours());
   }
 
+  function dayBucketKey(sampledAt) {
+    // Day bucket in UTC. e.g. '2026-05-27'
+    const d = new Date(sampledAt);
+    const pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
+  }
+
   function pruneOldBuckets(entry) {
-    // Keep the most recent 24 hourly buckets.
-    const keys = Object.keys(entry.buckets);
-    if (keys.length <= 24) return;
-    keys.sort();
-    while (keys.length > 24) {
-      const k = keys.shift();
-      delete entry.buckets[k];
+    // Keep the most recent 24 hourly buckets and 7 daily buckets.
+    const hourKeys = Object.keys(entry.buckets);
+    if (hourKeys.length > 24) {
+      hourKeys.sort();
+      while (hourKeys.length > 24) {
+        const k = hourKeys.shift();
+        delete entry.buckets[k];
+      }
+    }
+    const dayKeys = Object.keys(entry.dailyBuckets);
+    if (dayKeys.length > 7) {
+      dayKeys.sort();
+      while (dayKeys.length > 7) {
+        const k = dayKeys.shift();
+        delete entry.dailyBuckets[k];
+      }
     }
   }
 
@@ -152,7 +168,8 @@ function createMemoryStore(config) {
         firstSeen: event.sampledAt,
         lastSeen: event.sampledAt,
         samples: [],
-        buckets: {}, // hour key -> count
+        buckets: {},      // hour key (UTC) -> count, rolling 24h
+        dailyBuckets: {}, // day key (UTC)  -> count, rolling 7d
       };
       routes.set(key, entry);
     }
@@ -166,9 +183,11 @@ function createMemoryStore(config) {
       entry.fields[issue.field] = (entry.fields[issue.field] || 0) + 1;
     }
 
-    // Hourly bucket
-    const bk = bucketKey(event.sampledAt);
-    entry.buckets[bk] = (entry.buckets[bk] || 0) + event.issues.length;
+    // Hourly + daily buckets
+    const hk = hourBucketKey(event.sampledAt);
+    entry.buckets[hk] = (entry.buckets[hk] || 0) + event.issues.length;
+    const dk = dayBucketKey(event.sampledAt);
+    entry.dailyBuckets[dk] = (entry.dailyBuckets[dk] || 0) + event.issues.length;
     pruneOldBuckets(entry);
 
     // Sample buffer (ring)
@@ -202,6 +221,7 @@ function createMemoryStore(config) {
         lastSeen: entry.lastSeen,
         samples: entry.samples.slice(),
         buckets: Object.assign({}, entry.buckets),
+        dailyBuckets: Object.assign({}, entry.dailyBuckets),
       });
     }
     list.sort(function (a, b) { return b.total - a.total; });

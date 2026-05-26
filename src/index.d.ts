@@ -234,7 +234,10 @@ export interface DriftReport {
     firstSeen: number;
     lastSeen: number;
     samples: Array<{ sampledAt: number; part: string; issues: DriftIssue[] }>;
+    /** Hourly buckets (UTC), rolling 24h. Keys like `2026-05-27T14`. */
     buckets: Record<string, number>;
+    /** Daily buckets (UTC), rolling 7 days. Keys like `2026-05-27`. (v1.10.1+) */
+    dailyBuckets: Record<string, number>;
   }>;
 }
 
@@ -254,6 +257,16 @@ export interface DriftConfig {
   store?: DriftStore;
   /** `'warn'` (default) prints a console.warn per unique drift signature. `'silent'` suppresses logs. */
   logLevel?: 'warn' | 'silent';
+  /**
+   * Expose `POST <docsPath>/drift/reset` to clear the store at runtime (v1.10.1+).
+   *
+   * Default `false`. When enabled without `resetToken`, the endpoint is open —
+   * only do this on internal networks. With `resetToken`, the endpoint requires
+   * a matching `x-doctreen-drift-token` header (or `?token=` query param).
+   */
+  allowReset?: boolean;
+  /** Shared secret required on `POST /drift/reset`. (v1.10.1+) */
+  resetToken?: string;
 }
 
 /** Entry in the OpenAPI `servers` array. */
@@ -320,6 +333,8 @@ export interface NormalizedConfig {
     onDrift: ((event: DriftEvent) => void) | null;
     store: DriftStore | null;
     logLevel: 'warn' | 'silent';
+    allowReset: boolean;
+    resetToken: string | null;
   };
 }
 

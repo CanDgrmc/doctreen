@@ -25,13 +25,13 @@
  *
  * @typedef {{ servers?: OpenApiServer[], securitySchemes?: Record<string, any>, security?: Array<Record<string, string[]>> }} OpenApiConfig
  *
- * @typedef {{ enabled?: boolean, sampleRate?: number, maxSamples?: number, webhook?: string, onDrift?: Function, store?: { record: Function, report: Function, reset: Function }, logLevel?: 'warn'|'silent' }} DriftConfig
+ * @typedef {{ enabled?: boolean, sampleRate?: number, maxSamples?: number, webhook?: string, onDrift?: Function, store?: { record: Function, report: Function, reset: Function }, logLevel?: 'warn'|'silent', allowReset?: boolean, resetToken?: string }} DriftConfig
  *
  * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean, openapi?: OpenApiConfig, headHtml?: string, drift?: DriftConfig|boolean }} UserConfig
  */
 
 /**
- * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: boolean, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string } }} NormalizedConfig
+ * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: boolean, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string, allowReset: boolean, resetToken: string|null } }} NormalizedConfig
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -268,6 +268,8 @@ function normalizeDriftConfig(input) {
     onDrift: null,
     store: null,
     logLevel: 'warn',
+    allowReset: false,
+    resetToken: null,
   };
 
   if (input === false) return Object.assign({}, defaults, { enabled: false });
@@ -282,6 +284,8 @@ function normalizeDriftConfig(input) {
     onDrift: typeof input.onDrift === 'function' ? input.onDrift : null,
     store: (input.store && typeof input.store.record === 'function') ? input.store : null,
     logLevel: input.logLevel === 'silent' ? 'silent' : 'warn',
+    allowReset: Boolean(input.allowReset),
+    resetToken: typeof input.resetToken === 'string' && input.resetToken.length > 0 ? input.resetToken : null,
   };
 }
 

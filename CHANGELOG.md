@@ -4,6 +4,54 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.1] — 2026-05-27
+
+### Added
+
+- **Drift store reset endpoint.** `POST <docsPath>/drift/reset` clears the
+  in-memory store on demand — useful between integration test runs, after
+  deploys, or when a known bad client has finished its run. Opt-in via
+  `drift.allowReset: true`; optionally protected by `drift.resetToken`
+  matched against the `x-doctreen-drift-token` header or `?token=` query
+  param. Available on all five adapters.
+
+  ```js
+  expressAdapter(app, {
+    drift: {
+      enabled: true,
+      allowReset: true,
+      resetToken: process.env.DOCTREEN_RESET_TOKEN,
+    },
+  });
+  ```
+
+- **`doctreen drift reset` CLI.** Companion to `drift report`. POSTs to
+  `/drift/reset`, prints a confirmation, exits non-zero on failure.
+
+  ```bash
+  npx doctreen drift reset --url http://localhost:3000/docs --token "$DOCTREEN_RESET_TOKEN"
+  ```
+
+- **Daily buckets in drift report.** Alongside the existing rolling 24-hour
+  hourly buckets, the store now keeps a rolling 7-day daily aggregate per
+  route under `dailyBuckets`. Same dedup window, same sampling, no extra
+  cost — exposed in `/drift.json` for dashboards that want a longer view
+  than 24h.
+
+- **Redis-backed `DriftStore` reference implementation.**
+  `example/drift-redis-store.js` ships a complete, multi-replica-safe
+  implementation of the `DriftStore` interface for `ioredis` / `redis@4+`
+  (bring your own client). Drop-in for production deployments that need
+  aggregates to survive restarts and stay consistent across replicas.
+
+### Migration
+
+No breaking changes. The reset endpoint defaults to disabled — existing
+v1.10.0 servers behave identically until `allowReset` is flipped.
+
+`dailyBuckets` is a new top-level field in the per-route report payload;
+existing consumers continue to read `buckets` (hourly) unchanged.
+
 ## [1.10.0] — 2026-05-27
 
 ### Added
