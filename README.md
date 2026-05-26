@@ -5,7 +5,7 @@
 [**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.7.0** &nbsp;—&nbsp; **OpenAPI 3.1 export.** Every adapter now serves the OpenAPI 3.1 document at `<docsPath>/openapi.json`, and the docs UI ships with a one-click "Export to OpenAPI 3.1" download button next to "Export to Postman". **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.7.0)**
+> **What's new in v1.8.0** &nbsp;—&nbsp; **`securitySchemes` + per-route `security`.** OpenAPI security can now be declared once and attached automatically: pass `config.openapi.securitySchemes` to register the schemes (Bearer, ApiKey, OAuth2, …), and `config.openapi.security`… **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.8.0)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder), and it generates an interactive docs UI, runnable integration flows, and Postman exports for **Express, Fastify, Hono, Koa, and NestJS** — no router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
