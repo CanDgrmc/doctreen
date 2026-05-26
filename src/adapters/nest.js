@@ -4,7 +4,7 @@
 
 const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = require('../index');
 const { serveDocsUI } = require('../ui/index');
-const { zodToSchemaNode, isZodSchema } = require('./zod');
+const { convertSchema, normalizeRouteSchemas } = require('../internal/schemas');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -52,22 +52,6 @@ function extractParamsFromPath(path) {
   let m;
   while ((m = re.exec(path)) !== null) params.push(m[1]);
   return params;
-}
-
-// ─── Schema coercion ──────────────────────────────────────────────────────────
-
-/**
- * Accepts a SchemaNode (from the `s` builder), a Zod schema, or null/undefined.
- * Returns a SchemaNode or null.
- *
- * @param {any} schema
- * @returns {import('../index').SchemaNode|null}
- */
-function convertSchema(schema) {
-  if (!schema) return null;
-  if (isZodSchema(schema)) return zodToSchemaNode(schema);
-  if (typeof schema === 'object' && typeof schema.type === 'string') return schema;
-  return null;
 }
 
 // ─── Route seeding ────────────────────────────────────────────────────────────
@@ -408,7 +392,7 @@ function nestAdapter(app, userConfig) {
  * @returns {Function}
  */
 function defineRoute(handler, schemas) {
-  if (handler) handler.__docLibSchema = schemas || {};
+  if (handler) handler.__docLibSchema = normalizeRouteSchemas(schemas) || {};
   return handler;
 }
 

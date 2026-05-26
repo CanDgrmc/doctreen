@@ -1,4 +1,5 @@
 import type { UserConfig, SchemaNode, s } from '../index';
+import type { SchemaInput } from './zod';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Structural interfaces — no hard dependency on koa or @types/koa
@@ -99,19 +100,24 @@ export interface RouteSchemas {
    * @example { Authorization: 'Bearer <token>' }
    */
   headers?: Record<string, string>;
-  /** Request body and query parameter schemas. */
-  request?: { body?: SchemaNode | null; query?: SchemaNode | null } | null;
-  /** Response payload schema. */
-  response?: SchemaNode | null;
+  /**
+   * Request body and query parameter schemas.
+   * Accepts a SchemaNode (from the `s` builder) or a Zod schema — both work
+   * interchangeably. Zod schemas are converted to SchemaNode automatically.
+   */
+  request?: { body?: SchemaInput | null; query?: SchemaInput | null } | null;
+  /** Response payload schema. Accepts SchemaNode or Zod schema. */
+  response?: SchemaInput | null;
   /**
    * Documented error responses keyed by HTTP status code.
    * @example
    * errors: {
    *   404: 'Not found',
    *   422: { description: 'Validation failed', schema: s.object({ message: s.string() }) },
+   *   409: { description: 'Conflict', schema: z.object({ message: z.string() }) },
    * }
    */
-  errors?: Record<number, string | { description?: string | null; schema?: SchemaNode | null }>;
+  errors?: Record<number, string | { description?: string | null; schema?: SchemaInput | null }>;
 }
 
 /**

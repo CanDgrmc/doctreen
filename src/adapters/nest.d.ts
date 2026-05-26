@@ -1,15 +1,8 @@
 import type { UserConfig, SchemaNode, s, defineSchema } from '../index';
+import type { SchemaInput } from './zod';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Schema input types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * A schema accepted by doctreen's NestJS integration.
- * Either a doctreen `SchemaNode` (built with the `s` helper) or a Zod schema
- * (any object with a `_def` property, i.e. the result of `z.object(...)` etc.).
- */
-export type SchemaInput = SchemaNode | { _def: any };
+// Re-export so existing `import { SchemaInput } from 'doctreen/nest'` still resolves.
+export type { SchemaInput };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NestRouteSchemas

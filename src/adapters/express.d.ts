@@ -1,5 +1,6 @@
 import type { RequestHandler, Request, Response, NextFunction } from 'express';
 import type { UserConfig, SchemaNode, s } from '../index';
+import type { SchemaInput } from './zod';
 
 /**
  * Creates an Express middleware that intercepts requests to `config.docsPath`,
@@ -50,22 +51,27 @@ export interface RouteSchemas {
    * @example { Authorization: 'Bearer <token>', 'Content-Type': 'application/json' }
    */
   headers?: Record<string, string>;
-  /** Request body and query parameter schemas. */
-  request?: { body?: SchemaNode | null; query?: SchemaNode | null } | null;
-  /** Response payload schema. */
-  response?: SchemaNode | null;
+  /**
+   * Request body and query parameter schemas.
+   * Accepts a SchemaNode (from the `s` builder) or a Zod schema — both work
+   * interchangeably. Zod schemas are converted to SchemaNode automatically.
+   */
+  request?: { body?: SchemaInput | null; query?: SchemaInput | null } | null;
+  /** Response payload schema. Accepts SchemaNode or Zod schema. */
+  response?: SchemaInput | null;
   /**
    * Documented error responses keyed by HTTP status code.
    * Values can be a plain description string or an object with an optional
-   * description and/or response body schema.
+   * description and/or response body schema (SchemaNode or Zod schema).
    *
    * @example
    * errors: {
    *   404: 'User not found',
    *   422: { description: 'Validation failed', schema: s.object({ message: s.string() }) },
+   *   409: { description: 'Conflict', schema: z.object({ message: z.string() }) },
    * }
    */
-  errors?: Record<number, string | { description?: string | null; schema?: SchemaNode | null }>;
+  errors?: Record<number, string | { description?: string | null; schema?: SchemaInput | null }>;
 }
 
 /**

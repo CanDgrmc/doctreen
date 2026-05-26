@@ -13,6 +13,7 @@
 const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema, s } = require('../index');
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
+const { normalizeRouteSchemas } = require('../internal/schemas');
 
 // Only document these HTTP methods — skip HEAD, OPTIONS (auto-added by @koa/router for GET routes)
 const HTTP_METHODS_TO_DOCUMENT = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -256,7 +257,7 @@ function koaAdapter(router, userConfig) {
  * @returns {Function}
  */
 function defineRoute(handler, schemas) {
-  handler.__docLibSchema = schemas || {};
+  handler.__docLibSchema = normalizeRouteSchemas(schemas) || {};
   return handler;
 }
 

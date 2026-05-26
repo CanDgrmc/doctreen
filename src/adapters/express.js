@@ -30,6 +30,7 @@
 const { RouteRegistry, normalizeConfig, shouldExclude, inferSchema, parseJSDoc, defineSchema, s } = require('../index');
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
+const { normalizeRouteSchemas } = require('../internal/schemas');
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
 
@@ -481,7 +482,7 @@ function expressAdapter(app, userConfig = {}) {
  * ));
  */
 function defineRoute(handler, schemas) {
-  handler.__docLibSchema = schemas || {};
+  handler.__docLibSchema = normalizeRouteSchemas(schemas) || {};
   return handler;
 }
 

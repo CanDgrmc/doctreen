@@ -13,6 +13,7 @@
 const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema, s } = require('../index');
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
+const { normalizeRouteSchemas } = require('../internal/schemas');
 
 /**
  * normalizeErrors
@@ -275,7 +276,7 @@ function fastifyAdapter(fastify, userConfig) {
  * @returns {Function}
  */
 function defineRoute(handler, schemas) {
-  handler.__docLibSchema = schemas || {};
+  handler.__docLibSchema = normalizeRouteSchemas(schemas) || {};
   return handler;
 }
 

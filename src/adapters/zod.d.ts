@@ -27,3 +27,13 @@ export declare function zodToSchemaNode(zodSchema: any, depth?: number): SchemaN
  * Useful for writing generic helpers that accept either a `SchemaNode` or a Zod schema.
  */
 export declare function isZodSchema(val: any): boolean;
+
+/**
+ * Structural type matching any Zod schema instance — i.e. anything with a `_def`
+ * property. Used by adapter declaration files so that `defineRoute` /
+ * `@DocRoute` accept Zod schemas without a hard dependency on the `zod` types.
+ */
+export type ZodSchemaLike = { _def: any };
+
+/** Union accepted by adapter `defineRoute` / `@DocRoute` schema slots. */
+export type SchemaInput = SchemaNode | ZodSchemaLike;
