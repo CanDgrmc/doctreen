@@ -758,6 +758,7 @@ function serveDocsUI(routes, config, options) {
   const liveCount   = routes.filter((r) => r.requestSchema !== null || r.responseSchema !== null).length;
   const flows       = Array.isArray(options.flows) ? options.flows : [];
   const totalFlows  = flows.length;
+  const driftEnabled = !!(config.drift && config.drift.enabled);
 
   const groups         = groupRoutes(routes);
   const sidebarHtml    = renderSidebar(groups);
@@ -842,6 +843,91 @@ function serveDocsUI(routes, config, options) {
       background: rgba(72,187,120,0.14);
       border-color: rgba(72,187,120,0.3);
       color: #68d391;
+    }
+    .header-tab.is-active-drift {
+      background: rgba(237,137,54,0.14);
+      border-color: rgba(237,137,54,0.3);
+      color: #f6ad55;
+    }
+    .header-tab-count {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: rgba(237,137,54,0.2);
+      color: #f6ad55;
+      font-size: 0.65rem;
+      font-weight: 700;
+    }
+
+    /* ── Drift pane ─────────────────────────────────────────────────────────── */
+    .drift-empty {
+      padding: 60px 40px;
+      text-align: center;
+      color: var(--text-muted);
+    }
+    .drift-empty strong { color: var(--text); display: block; margin-bottom: 8px; font-size: 1rem; }
+    .drift-summary {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border-sub);
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .drift-summary-stat { display: flex; flex-direction: column; gap: 2px; }
+    .drift-summary-stat .num { font-size: 1.4rem; font-weight: 700; color: var(--text); }
+    .drift-summary-stat .lbl { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .drift-route-list { display: flex; flex-direction: column; }
+    .drift-route {
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border-sub);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .drift-route-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .drift-route-path { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.9rem; color: var(--text); }
+    .drift-route-total {
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: rgba(237,137,54,0.18);
+      color: #f6ad55;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    .drift-kind-list { display: flex; gap: 8px; flex-wrap: wrap; }
+    .drift-kind {
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.04);
+      color: var(--text-muted);
+      font-size: 0.7rem;
+    }
+    .drift-kind-missing { color: #fc8181; background: rgba(252,129,129,0.1); }
+    .drift-kind-unexpected { color: #f6ad55; background: rgba(246,173,85,0.1); }
+    .drift-kind-mismatch { color: #f687b3; background: rgba(246,135,179,0.1); }
+    .drift-samples { font-size: 0.78rem; color: var(--text-muted); font-family: 'SF Mono', Menlo, Consolas, monospace; }
+    .drift-samples li { list-style: none; padding: 2px 0; }
+    .drift-toolbar { padding: 12px 24px; border-bottom: 1px solid var(--border-sub); display: flex; gap: 10px; align-items: center; }
+    .drift-refresh {
+      padding: 6px 12px;
+      background: rgba(66,153,225,0.14);
+      border: 1px solid rgba(66,153,225,0.3);
+      border-radius: 6px;
+      color: #63b3ed;
+      cursor: pointer;
+      font-size: 0.78rem;
+    }
+    .drift-refresh:hover { background: rgba(66,153,225,0.22); }
+    .badge-drift {
+      background: rgba(237,137,54,0.18);
+      color: #f6ad55;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      margin-left: 6px;
     }
     .header-left { display: flex; flex-direction: column; gap: 4px; }
     .header-title { font-size: 1.45rem; font-weight: 700; color: #fff; }
@@ -2045,7 +2131,7 @@ function serveDocsUI(routes, config, options) {
       <button id="export-postman-btn" class="export-postman-btn">Export to Postman</button>
     </div>
   </div>
-  ${flows.length > 0 ? `<div class="header-tabs" id="header-tabs"><button class="header-tab is-active-routes" data-pane="routes">Routes</button><button class="header-tab" data-pane="flows">Flows</button></div>` : ''}
+  ${(flows.length > 0 || driftEnabled) ? `<div class="header-tabs" id="header-tabs"><button class="header-tab is-active-routes" data-pane="routes">Routes</button>${flows.length > 0 ? `<button class="header-tab" data-pane="flows">Flows</button>` : ''}${driftEnabled ? `<button class="header-tab" data-pane="drift">Drift<span class="header-tab-count" id="drift-tab-count" style="display:none">0</span></button>` : ''}</div>` : ''}
 </header>
 
 <div class="app-shell">
@@ -2068,6 +2154,18 @@ function serveDocsUI(routes, config, options) {
       ${sectionsHtml}
     </div>
     ${flows.length > 0 ? `<div class="content-pane" id="content-pane-flows" data-pane="flows">${flowSectionsHtml}</div>` : ''}
+    ${driftEnabled ? `<div class="content-pane" id="content-pane-drift" data-pane="drift">
+      <div class="drift-toolbar">
+        <button class="drift-refresh" id="drift-refresh-btn" type="button">Refresh</button>
+        <span style="color: var(--text-muted); font-size: 0.78rem;" id="drift-last-fetched"></span>
+      </div>
+      <div id="drift-pane-body">
+        <div class="drift-empty">
+          <strong>Loading drift report…</strong>
+          Sampling rate ${(config.drift && config.drift.sampleRate) || 0.01}; events appear here as mismatching traffic arrives.
+        </div>
+      </div>
+    </div>` : ''}
   </main>
 
 </div>
@@ -2104,6 +2202,8 @@ function serveDocsUI(routes, config, options) {
   var META   = ${JSON.stringify({ title: meta.title, version: meta.version, description: meta.description })};
   var FLOW_RUN_ENDPOINT = ${JSON.stringify(config.docsPath + '/__flows/run')};
   var OPENAPI_ENDPOINT  = ${JSON.stringify(config.docsPath + '/openapi.json')};
+  var DRIFT_ENDPOINT    = ${JSON.stringify(config.docsPath + '/drift.json')};
+  var DRIFT_ENABLED     = ${JSON.stringify(driftEnabled)};
   var CLIENT_METHOD_CLASSES = ${JSON.stringify(Object.keys(METHOD_STYLES).reduce(function (acc, key) {
     acc[key] = METHOD_STYLES[key].cls;
     return acc;
@@ -2135,14 +2235,154 @@ function serveDocsUI(routes, config, options) {
         var isActive = el.getAttribute('data-pane') === pane;
         el.classList.toggle('is-active-routes', isActive && pane === 'routes');
         el.classList.toggle('is-active-flows', isActive && pane === 'flows');
+        el.classList.toggle('is-active-drift', isActive && pane === 'drift');
       });
     }
 
     if (searchInput) {
-      searchInput.placeholder = pane === 'flows' ? 'Filter flows…' : 'Filter routes…';
+      searchInput.placeholder = pane === 'flows' ? 'Filter flows…' : pane === 'drift' ? '' : 'Filter routes…';
     }
 
+    if (pane === 'drift') loadDriftReport();
+
     applyFilter(searchInput ? searchInput.value : '');
+  }
+
+  // ── Drift report (v1.10+) ───────────────────────────────────────────────────
+  var driftLastFetched = 0;
+  var driftCache = null;
+  function loadDriftReport(force) {
+    if (!DRIFT_ENABLED) return;
+    var body = document.getElementById('drift-pane-body');
+    var fetchedEl = document.getElementById('drift-last-fetched');
+    if (!body) return;
+    fetch(DRIFT_ENDPOINT, { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (report) {
+        driftCache = report;
+        driftLastFetched = Date.now();
+        renderDriftReport(report);
+        if (fetchedEl) fetchedEl.textContent = 'Last fetched ' + new Date(driftLastFetched).toLocaleTimeString();
+        updateDriftBadges(report);
+      })
+      .catch(function (err) {
+        body.innerHTML = '<div class="drift-empty"><strong>Could not load /drift.json</strong>' + escapeText(String(err)) + '</div>';
+      });
+  }
+
+  function escapeText(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+
+  function renderDriftReport(report) {
+    var body = document.getElementById('drift-pane-body');
+    var tabCount = document.getElementById('drift-tab-count');
+    if (!body) return;
+
+    var total = (report && report.totalIssues) || 0;
+    var routes = (report && report.routes) || [];
+    if (tabCount) {
+      if (total > 0) { tabCount.style.display = ''; tabCount.textContent = total; }
+      else { tabCount.style.display = 'none'; }
+    }
+
+    if (routes.length === 0) {
+      body.innerHTML =
+        '<div class="drift-empty">' +
+          '<strong>No drift detected yet</strong>' +
+          'When traffic arrives with shapes that disagree with your declared schema, the events show up here.' +
+        '</div>';
+      return;
+    }
+
+    var routeBuckets = countRouteBuckets(routes);
+    var summary =
+      '<div class="drift-summary">' +
+        '<div class="drift-summary-stat"><span class="num">' + total + '</span><span class="lbl">Total issues</span></div>' +
+        '<div class="drift-summary-stat"><span class="num">' + routes.length + '</span><span class="lbl">Routes affected</span></div>' +
+        '<div class="drift-summary-stat"><span class="num">' + routeBuckets.kinds.missing + '</span><span class="lbl">Missing required</span></div>' +
+        '<div class="drift-summary-stat"><span class="num">' + routeBuckets.kinds.unexpected + '</span><span class="lbl">Unexpected field</span></div>' +
+        '<div class="drift-summary-stat"><span class="num">' + routeBuckets.kinds.mismatch + '</span><span class="lbl">Type mismatch</span></div>' +
+      '</div>';
+
+    var list = routes.map(renderDriftRoute).join('');
+    body.innerHTML = summary + '<div class="drift-route-list">' + list + '</div>';
+  }
+
+  function countRouteBuckets(routes) {
+    var kinds = { missing: 0, unexpected: 0, mismatch: 0 };
+    routes.forEach(function (r) {
+      kinds.missing    += (r.kinds && r.kinds['missing-required'])  || 0;
+      kinds.unexpected += (r.kinds && r.kinds['unexpected-field'])  || 0;
+      kinds.mismatch   += (r.kinds && r.kinds['type-mismatch'])     || 0;
+    });
+    return { kinds: kinds };
+  }
+
+  function renderDriftRoute(r) {
+    var kinds = '';
+    if (r.kinds['missing-required'])  kinds += '<span class="drift-kind drift-kind-missing">missing × ' + r.kinds['missing-required'] + '</span>';
+    if (r.kinds['unexpected-field'])  kinds += '<span class="drift-kind drift-kind-unexpected">unexpected × ' + r.kinds['unexpected-field'] + '</span>';
+    if (r.kinds['type-mismatch'])     kinds += '<span class="drift-kind drift-kind-mismatch">mismatch × ' + r.kinds['type-mismatch'] + '</span>';
+
+    var topFields = Object.keys(r.fields || {})
+      .sort(function (a, b) { return r.fields[b] - r.fields[a]; })
+      .slice(0, 3)
+      .map(function (f) { return '<span class="drift-kind">' + escapeText(f) + ' × ' + r.fields[f] + '</span>'; })
+      .join('');
+
+    var samples = (r.samples || []).slice(-3).reverse().map(function (s) {
+      var issues = s.issues.map(function (i) {
+        if (i.kind === 'missing-required') return 'missing "' + i.field + '"';
+        if (i.kind === 'unexpected-field') return 'unexpected "' + i.field + '" (' + (i.got || '?') + ')';
+        if (i.kind === 'type-mismatch')    return '"' + i.field + '" expected ' + i.expected + ', got ' + i.got;
+        return i.kind + ' ' + i.field;
+      }).join(', ');
+      return '<li>' + new Date(s.sampledAt).toLocaleString() + ' · ' + s.part + ' · ' + escapeText(issues) + '</li>';
+    }).join('');
+
+    return '<div class="drift-route">' +
+      '<div class="drift-route-head">' +
+        '<span class="method method-' + (r.method || '').toLowerCase() + '">' + escapeText(r.method) + '</span>' +
+        '<span class="drift-route-path">' + escapeText(r.path) + '</span>' +
+        '<span class="drift-route-total">' + r.total + ' issue' + (r.total !== 1 ? 's' : '') + '</span>' +
+      '</div>' +
+      '<div class="drift-kind-list">' + kinds + (topFields ? ' · ' + topFields : '') + '</div>' +
+      (samples ? '<ul class="drift-samples">' + samples + '</ul>' : '') +
+    '</div>';
+  }
+
+  function updateDriftBadges(report) {
+    var counts = {};
+    (report.routes || []).forEach(function (r) { counts[(r.method || '').toUpperCase() + ' ' + r.path] = r.total; });
+    document.querySelectorAll('tr.route-row').forEach(function (row) {
+      var existing = row.querySelector('.badge-drift');
+      if (existing) existing.remove();
+      var method = row.getAttribute('data-method');
+      var path   = row.getAttribute('data-path');
+      if (!method || !path) return;
+      var k = method.toUpperCase() + ' ' + path;
+      if (counts[k]) {
+        var pathCell = row.querySelector('.route-path-cell') || row.children[1];
+        if (pathCell) {
+          var badge = document.createElement('span');
+          badge.className = 'badge-drift';
+          badge.title = counts[k] + ' drift events';
+          badge.textContent = 'DRIFT ' + counts[k];
+          pathCell.appendChild(badge);
+        }
+      }
+    });
+  }
+
+  if (DRIFT_ENABLED) {
+    // Fire one background fetch on load so the tab badge populates without
+    // requiring the user to click the tab first.
+    setTimeout(function () { loadDriftReport(); }, 0);
+    var refreshBtn = document.getElementById('drift-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', function () { loadDriftReport(true); });
   }
 
   function expandDetailRow(row) {

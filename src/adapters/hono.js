@@ -15,6 +15,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { createDriftPipeline } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 // Only document these HTTP methods — skip ALL, OPTIONS, HEAD (internal/auto-added)
@@ -81,7 +82,7 @@ function seedEntry(entry, handler) {
   // 1. defineRoute — highest priority
   if (handler.__docLibSchema) {
     const predef = handler.__docLibSchema;
-    if (entry.requestSchema  === null && predef.request   !== undefined) entry.requestSchema  = predef.request;
+    if (entry.requestSchema  === null && predef.request   !== undefined) { entry.requestSchema  = predef.request; entry.requestSchemaDeclared = true; }
     if (entry.responseSchema === null && predef.response  !== undefined) entry.responseSchema = predef.response;
     if (entry.description    === null && predef.description)             entry.description    = predef.description;
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
@@ -98,7 +99,7 @@ function seedEntry(entry, handler) {
     if (jsDoc) {
       if (entry.description    === null && jsDoc.description) entry.description    = jsDoc.description;
       if (entry.requestHeaders === null && jsDoc.headers)     entry.requestHeaders = jsDoc.headers;
-      if (entry.requestSchema  === null && jsDoc.request)     entry.requestSchema  = jsDoc.request;
+      if (entry.requestSchema  === null && jsDoc.request)     { entry.requestSchema  = jsDoc.request; entry.requestSchemaDeclared = true; }
       if (entry.responseSchema === null && jsDoc.response)    entry.responseSchema = jsDoc.response;
     }
   }
@@ -177,6 +178,9 @@ function honoAdapter(app, userConfig) {
 
   if (!config.enabled) return;
 
+  // Schema drift pipeline (v1.10+). See express adapter for details.
+  config._drift = createDriftPipeline(config);
+
   /** @type {RouteRegistry|null} */
   let cachedRegistry = null;
 
@@ -186,6 +190,40 @@ function honoAdapter(app, userConfig) {
     );
     cachedRegistry = buildRegistrySnapshot(appRoutes, config);
     return cachedRegistry;
+  }
+
+  // ── Schema drift detection (v1.10+) ─────────────────────────────────────
+  // Independent of `validate`. Honors sampling so cost is negligible at the
+  // default rate. Reads body/query once; Hono caches `c.req.json()` per
+  // request so subsequent reads in user code don't re-parse.
+  if (config._drift.enabled) {
+    app.use('*', async function driftHook(c, next) {
+      const method = c.req.method;
+      const path   = c.req.path;
+      if (path === config.docsPath || path === config.docsPath + '/__flows/run') return next();
+
+      await next();
+
+      if (!cachedRegistry) refreshRegistry();
+      const entry = cachedRegistry.findByRequestPath(method, path);
+      if (!entry || !entry.requestSchemaDeclared || !entry.requestSchema) return;
+
+      const route = { method: entry.method, path: entry.path };
+      if (entry.requestSchema.body) {
+        let body;
+        try { body = await c.req.json(); } catch (_) { body = null; }
+        if (body && typeof body === 'object') {
+          config._drift.recordIfDrift(route, 'body', entry.requestSchema.body, body);
+        }
+      }
+      if (entry.requestSchema.query) {
+        try {
+          const url = new URL(c.req.url);
+          const query = Object.fromEntries(url.searchParams);
+          config._drift.recordIfDrift(route, 'query', entry.requestSchema.query, query);
+        } catch (_) { /* swallow */ }
+      }
+    });
   }
 
   // ── Runtime validation gate (v1.6+) ─────────────────────────────────────
@@ -226,6 +264,13 @@ function honoAdapter(app, userConfig) {
     if (!cachedRegistry || config.liveReload) refreshRegistry();
     const doc = buildOpenApiDocument(cachedRegistry.getVisible(), config);
     return c.json(doc);
+  });
+
+  app.get(config.docsPath + '/drift.json', async function serveDrift(c) {
+    const report = config._drift.enabled
+      ? await Promise.resolve(config._drift.report())
+      : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
+    return c.json(report);
   });
 
   app.post(config.docsPath + '/__flows/run', async function runDocsFlow(c) {

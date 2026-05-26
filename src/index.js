@@ -25,11 +25,13 @@
  *
  * @typedef {{ servers?: OpenApiServer[], securitySchemes?: Record<string, any>, security?: Array<Record<string, string[]>> }} OpenApiConfig
  *
- * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean, openapi?: OpenApiConfig, headHtml?: string }} UserConfig
+ * @typedef {{ enabled?: boolean, sampleRate?: number, maxSamples?: number, webhook?: string, onDrift?: Function, store?: { record: Function, report: Function, reset: Function }, logLevel?: 'warn'|'silent' }} DriftConfig
+ *
+ * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean, openapi?: OpenApiConfig, headHtml?: string, drift?: DriftConfig|boolean }} UserConfig
  */
 
 /**
- * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: boolean, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null }} NormalizedConfig
+ * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: boolean, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string } }} NormalizedConfig
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -243,6 +245,43 @@ function normalizeConfig(userConfig = {}) {
     // etc. Trusted input — DocTreen does not sanitise — so do not pass
     // anything derived from user-submitted data.
     headHtml: typeof userConfig.headHtml === 'string' ? userConfig.headHtml : null,
+
+    drift: normalizeDriftConfig(userConfig.drift),
+  };
+}
+
+/**
+ * Normalise the `drift` config block. Accepts:
+ *   - `false`     → disabled
+ *   - `true`      → enabled with defaults
+ *   - object      → merged onto defaults
+ *   - undefined   → enabled in dev (NODE_ENV !== 'production'), off in prod
+ *
+ * @param {boolean|object|undefined} input
+ */
+function normalizeDriftConfig(input) {
+  const defaults = {
+    enabled: process.env.NODE_ENV !== 'production',
+    sampleRate: 0.01,
+    maxSamples: 5,
+    webhook: null,
+    onDrift: null,
+    store: null,
+    logLevel: 'warn',
+  };
+
+  if (input === false) return Object.assign({}, defaults, { enabled: false });
+  if (input === true) return Object.assign({}, defaults, { enabled: true });
+  if (!input || typeof input !== 'object') return defaults;
+
+  return {
+    enabled: input.enabled !== undefined ? Boolean(input.enabled) : defaults.enabled,
+    sampleRate: typeof input.sampleRate === 'number' ? input.sampleRate : defaults.sampleRate,
+    maxSamples: typeof input.maxSamples === 'number' ? input.maxSamples : defaults.maxSamples,
+    webhook: typeof input.webhook === 'string' ? input.webhook : null,
+    onDrift: typeof input.onDrift === 'function' ? input.onDrift : null,
+    store: (input.store && typeof input.store.record === 'function') ? input.store : null,
+    logLevel: input.logLevel === 'silent' ? 'silent' : 'warn',
   };
 }
 

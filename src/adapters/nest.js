@@ -6,6 +6,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = requi
 const { serveDocsUI } = require('../ui/index');
 const { convertSchema, normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { createDriftPipeline } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 /** Duck-type check for "this is a Zod schema instance". */
@@ -80,6 +81,7 @@ function seedEntryFromSchema(entry, docSchema) {
       body: convertSchema(docSchema.request.body) || null,
       query: convertSchema(docSchema.request.query) || null,
     };
+    entry.requestSchemaDeclared = true;
     // Preserve original Zod schemas (when present) for v1.6+ runtime validation.
     const validatorBody  = isZodInstance(docSchema.request.body)  ? docSchema.request.body  : null;
     const validatorQuery = isZodInstance(docSchema.request.query) ? docSchema.request.query : null;
@@ -396,6 +398,9 @@ function nestAdapter(app, userConfig) {
   const config = normalizeConfig(userConfig);
   if (!config.enabled) return;
 
+  // Schema drift pipeline (v1.10+). See express adapter for details.
+  config._drift = createDriftPipeline(config);
+
   /** @type {import('../index').RouteRegistry|null} */
   let cachedRegistry = null;
 
@@ -419,6 +424,12 @@ function nestAdapter(app, userConfig) {
       const doc = buildOpenApiDocument(getRegistry().getVisible(), config);
       reply.header('Content-Type', 'application/json; charset=utf-8').send(doc);
     });
+    httpAdapter.get(config.docsPath + '/drift.json', async function (req, reply) {
+      const report = config._drift.enabled
+        ? await Promise.resolve(config._drift.report())
+        : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
+      reply.header('Content-Type', 'application/json; charset=utf-8').send(report);
+    });
   } else {
     // Express (default platform) and any other adapter that uses Node's
     // IncomingMessage / ServerResponse signature.
@@ -432,6 +443,49 @@ function nestAdapter(app, userConfig) {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.send(JSON.stringify(doc, null, 2));
     });
+    httpAdapter.get(config.docsPath + '/drift.json', async function (req, res) {
+      const report = config._drift.enabled
+        ? await Promise.resolve(config._drift.report())
+        : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.send(JSON.stringify(report, null, 2));
+    });
+  }
+
+  // ── Schema drift detection (v1.10+) ─────────────────────────────────────
+  // Register a global interceptor that runs alongside the validation guard.
+  // Uses a NestJS guard signature so we don't need an interceptor-specific
+  // import. Returns true unconditionally — purely observational.
+  if (config._drift.enabled && typeof app.useGlobalGuards === 'function') {
+    const driftGuard = {
+      canActivate(context) {
+        try {
+          const req = context.switchToHttp().getRequest();
+          const handler = context.getHandler();
+          const docSchema = handler ? Reflect.getMetadata(DOC_ROUTE_METADATA, handler) : null;
+          if (!docSchema || !docSchema.request) return true;
+
+          const declaredBody  = convertSchema(docSchema.request.body)  || null;
+          const declaredQuery = convertSchema(docSchema.request.query) || null;
+          if (!declaredBody && !declaredQuery) return true;
+
+          // NestJS path includes the controller prefix; req.route?.path is the
+          // declared pattern, falling back to url for safety.
+          const route = {
+            method: String(req.method || '').toUpperCase(),
+            path: (req.route && req.route.path) || req.url || '',
+          };
+          if (declaredBody && req.body && typeof req.body === 'object') {
+            config._drift.recordIfDrift(route, 'body', declaredBody, req.body);
+          }
+          if (declaredQuery && req.query && typeof req.query === 'object') {
+            config._drift.recordIfDrift(route, 'query', declaredQuery, req.query);
+          }
+        } catch (_) { /* swallow — drift must never break the request */ }
+        return true;
+      },
+    };
+    app.useGlobalGuards(driftGuard);
   }
 
   // ── Runtime validation gate (v1.6+) ─────────────────────────────────────

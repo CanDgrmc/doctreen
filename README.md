@@ -5,7 +5,7 @@
 [**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.9.0** &nbsp;—&nbsp; **`headHtml` config option.** Pass a raw HTML string and DocTreen appends it to the docs UI `<head>` — useful for analytics scripts (Vercel Analytics, Plausible, PostHog), favicons, custom theme-color / OG / Twitter meta tags, branded we… **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.9.0)**
+> **What's new in v1.10.0** &nbsp;—&nbsp; **Production-grade schema drift detection.** The experimental v1.5 `console.warn` is now a structured pipeline with an in-memory aggregator, per-route counters and hourly buckets, opt-in sampling (default 1%), a pluggable store interface… **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.10.0)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder), and it generates an interactive docs UI, runnable integration flows, and Postman exports for **Express, Fastify, Hono, Koa, and NestJS** — no router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
@@ -32,7 +32,7 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 - Runnable integration flows with a CLI runner suitable for CI
 - Postman Collection v2.1 export
 - **Runtime validation** — opt in with `validate: true` and invalid requests are rejected with a structured 422 before they reach your handler. Same schema as the docs.
-- **Schema Drift Detection (experimental)** — declared schemas are also compared against real traffic in development; mismatches log a one-line warning so docs and code stay in sync
+- **Schema Drift Detection** — declared schemas are compared against real traffic on every adapter; sampled mismatches feed a UI tab, `/drift.json`, and an opinionated CLI (`npx doctreen drift report --fail-on-mismatch`) so contracts and code never drift apart silently
 
 ## How DocTreen compares
 
@@ -60,7 +60,7 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 - [Zod Support](#zod-support)
 - [Runtime Validation](#runtime-validation)
 - [OpenAPI Export](#openapi-export)
-- [Schema Drift Detection (experimental)](#schema-drift-detection-experimental)
+- [Schema Drift Detection](#schema-drift-detection)
 - [Request Flows](#request-flows)
 - [Documenting Routes with JSDoc](#documenting-routes-with-jsdoc)
 - [Schema Builder](#schema-builder)
@@ -603,27 +603,79 @@ npx @apidevtools/swagger-cli validate https://your-api.example.com/docs/openapi.
 
 ---
 
-## Schema Drift Detection (experimental)
+## Schema Drift Detection
 
-When a route's request schema is declared via `defineRoute` (or JSDoc) on the Express adapter, DocTreen compares each incoming payload against the declared shape and logs a one-line warning to `console.warn` if they diverge. This is a development aid for catching the most common cause of stale docs: the schema you wrote no longer matches what your code actually accepts.
+When a route declares a request schema (via `defineRoute`, `@DocRoute`, JSDoc, or Fastify native JSON Schema), DocTreen compares each incoming payload against the declared shape. Mismatches are sampled, aggregated per route, and surfaced three ways: a `console.warn` line, a structured `/drift.json` endpoint, and a UI tab.
 
 ```text
-[doctreen] schema drift on POST /users body: missing required `email`
-[doctreen] schema drift on POST /users body: unexpected `legacy_field` (got string)
-[doctreen] schema drift on POST /users body: `age` expected number, got string
+[doctreen] schema drift on POST /users body: missing required "email"
+[doctreen] schema drift on POST /users body: unexpected "legacy_field" (got string)
+[doctreen] schema drift on POST /users body: "age" expected number, got string
 ```
 
-**What it catches today (top-level shape only):**
+**What it catches (top-level shape):**
 - Missing required properties
 - Unexpected properties not declared in the schema
 - Type mismatches between declared and runtime values
 
-**Properties:**
-- Runs only when `process.env.NODE_ENV !== 'production'`. Silent in production.
-- De-duplicated per `(method, path, drift signature)` so a misbehaving client cannot flood logs.
-- Available on the Express adapter in v1.5. Fastify, Hono, Koa, and NestJS adapters get parallel drift hooks in a follow-up patch.
+**Available on every adapter** (Express, Fastify, Hono, Koa, NestJS) since v1.10. The same pipeline powers the warning log, the UI tab, the JSON endpoint, and the CLI.
 
-This is the foundation for production-grade drift reporting on the roadmap — sampling, aggregation, and a dashboard for diffing live traffic against declared schemas. For now, treat it as an early signal during local development.
+### Configuration
+
+```js
+expressAdapter(app, {
+  drift: {
+    enabled: true,            // default: NODE_ENV !== 'production'
+    sampleRate: 0.05,          // record 5% of mismatching requests; default 0.01
+    maxSamples: 5,             // last-N samples per route; default 5
+    logLevel: 'warn',          // 'warn' or 'silent'; default 'warn'
+    onDrift: (event) => metrics.increment('api.drift', event.issues.length),
+    webhook: 'https://hooks.example.com/drift',
+    // store: customStore,     // implement { record, report, reset } for Redis/Postgres
+  },
+});
+```
+
+Pass `drift: false` to disable entirely. Pass `drift: true` to enable with defaults (useful in CI scripts).
+
+### The drift report endpoint
+
+`GET <docsPath>/drift.json` returns a structured snapshot:
+
+```json
+{
+  "generatedAt": 1764234567890,
+  "totalIssues": 42,
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/users",
+      "total": 27,
+      "kinds": { "missing-required": 4, "unexpected-field": 12, "type-mismatch": 11 },
+      "parts": { "body": 22, "query": 5 },
+      "fields": { "age": 9, "extra_field": 12 },
+      "firstSeen": 1764230000000,
+      "lastSeen": 1764234500000,
+      "samples": [/* last N */],
+      "buckets": { "2026-05-26T14": 12, "2026-05-26T15": 15 }
+    }
+  ]
+}
+```
+
+### CI integration
+
+The bundled `doctreen` CLI prints a table and exits non-zero when drift is present — drop it into any pipeline that already has the app reachable:
+
+```bash
+npx doctreen drift report --url http://localhost:3000/docs --fail-on-mismatch
+```
+
+`--json` prints the raw payload; `--route /users` filters by path substring; `--min-issues 5` only fails when the total crosses a threshold.
+
+### Pluggable storage
+
+The default in-memory store is fine for single-process apps. For multi-replica or long-running deployments, implement the `DriftStore` interface (`record(event)`, `report()`, `reset()`) — a Redis-backed example will ship alongside the v1.11 release.
 
 ---
 
@@ -1131,7 +1183,7 @@ The structural interfaces (`ExpressLike`, `FastifyLike`, etc.) let you use doctr
 2. On the first request to `/docs`, DocTreen walks `app._router.stack` recursively to discover all registered routes — lazy introspection solves the middleware-before-routes ordering problem.
 3. Route handlers are wrapped so that, in development, real HTTP traffic can fill in request/response schemas that weren't declared via `defineRoute` or JSDoc. Declared schemas always win; runtime sampling only fills the gaps.
 4. JSDoc comments inside handler functions are parsed via `fn.toString()` at runtime.
-5. If a route's schema *was* declared, each incoming payload is also compared against it for [schema drift](#schema-drift-detection-experimental) (dev-only warning).
+5. If a route's schema *was* declared, each incoming payload is also compared against it for [schema drift](#schema-drift-detection) — sampled, aggregated, and exposed via the UI tab and `/drift.json`.
 6. If flows are configured, `POST /docs/__flows/run` executes them through the shared runner.
 
 ### Fastify
@@ -1196,15 +1248,29 @@ npm run example:nest        # NestJS TS      → http://localhost:3001/docs
 
 ## Roadmap
 
+Strategy: **go deep, not wide.** Logging, security, auth, and APM stay out of scope — doctreen's moat is making the route registry the single source of truth. Everything below extends that registry into adjacent capabilities.
+
+**Shipped**
+
 - [x] **Runtime validation middleware** *(v1.6)* — Zod schemas validate incoming requests; 422 on mismatch.
-- [x] **OpenAPI 3.1 export** *(v1.7)* — same schema bag now also drives Scalar, Redoc, and Swagger UI via `GET /docs/openapi.json`.
+- [x] **OpenAPI 3.1 export** *(v1.7)* — same schema bag drives Scalar, Redoc, and Swagger UI via `GET /docs/openapi.json`.
 - [x] **`openapi.servers` + `securitySchemes` + per-route `security` + `hidden`** *(v1.8)* — declare auth schemes once, attach to operations automatically; `Authorization` header auto-stripped; routes can opt out of docs entirely.
 - [x] **`headHtml` config** *(v1.9)* — inject analytics scripts, custom CSS, favicons, or OG metadata into the docs UI `<head>` without forking.
-- [ ] **Schema drift detection — production grade** — sampling, aggregation, and a dashboard view of declared vs. observed schemas. Extension of the v1.5 experimental dev warning.
-- [ ] **Drift hooks on Fastify, Hono, Koa, NestJS** — port the v1.5 Express drift check to every adapter now that the validation rails exist.
-- [ ] **`doctreen init` CLI** — scaffold a `doctreen-flows/` directory with an example flow and a CI-ready runner config.
-- [ ] **DocTreen Cloud** — hosted docs portal with versioning, custom domains, and CI flow monitoring (private beta).
-- [ ] **Python (FastAPI) and Go (chi / gin) adapters** — long-term, after the Node story is fully baked.
+- [x] **Schema drift detection — production grade** *(v1.10)* — structured pipeline with per-route aggregates and hourly buckets, opt-in sampling (default 1%), `onDrift` callback + webhook dispatch, pluggable `DriftStore` interface, `Drift` tab in the UI with per-route badges, and `npx doctreen drift report --fail-on-mismatch` for CI. All five adapters (Express, Fastify, Hono, Koa, NestJS) emit through the same pipeline.
+
+**Next up**
+
+- [ ] **OpenAPI polish** *(v1.11)* — `$ref`-based `components.schemas` dedup, first-class `tags`, `callbacks`/`webhooks`, multi-example, `npx doctreen lint openapi`.
+- [ ] **Mock server** *(v1.12)* — `npx doctreen mock --port 4000` serves a fake API from the registry. Faker-backed examples, latency/error injection, `--from openapi.json` for spec-driven mocking.
+- [ ] **Type & client codegen** *(v1.13)* — `npx doctreen codegen types` and `codegen client` produce typed request/response interfaces and a tRPC-style fetch wrapper. Watch mode for dev.
+- [ ] **AI-native endpoints** *(v1.14)* — `/docs/llm.txt`, `/docs/agents.json`, and `npx doctreen mcp` (Model Context Protocol server) so Claude and other agents discover your API as callable tools.
+- [ ] **Contract testing & spec diff** *(v1.15)* — `npx doctreen verify --against <url>` checks a deployed API against the spec; `npx doctreen diff old.json new.json` surfaces breaking changes with semver hints. GitHub Action included.
+- [ ] **`doctreen init` CLI** *(v1.16)* — detect the framework, inject adapter mount code, scaffold validation/OpenAPI config.
+
+**Long term**
+
+- [ ] **Python (FastAPI) and Go (chi / gin) adapters** — Pydantic → SchemaNode for the Python side; once the Node story is fully baked.
+- [ ] **DocTreen Cloud** — hosted docs portal with versioning, custom domains, drift monitoring, and CI flow runs (private beta).
 
 Have a feature request or use case we missed? [Open an issue →](https://github.com/CanDgrmc/doctreen/issues)
 

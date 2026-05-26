@@ -174,6 +174,86 @@ export interface UserConfig {
    * headHtml: '<script defer src="/_vercel/insights/script.js"></script>'
    */
   headHtml?: string;
+
+  /**
+   * Schema drift detection (v1.10+). Compares actual request payloads
+   * against the declared schema and aggregates mismatches.
+   *
+   * Pass `false` to disable, `true` to enable with defaults, or a config
+   * object to fine-tune sampling, callbacks, and storage.
+   *
+   * @default { enabled: NODE_ENV !== 'production', sampleRate: 0.01 }
+   */
+  drift?: boolean | DriftConfig;
+}
+
+/**
+ * A single drift event emitted by the per-adapter hook.
+ */
+export interface DriftIssue {
+  /** 'missing-required' | 'unexpected-field' | 'type-mismatch' */
+  kind: string;
+  field: string;
+  expected?: string;
+  got?: string;
+}
+
+export interface DriftEvent {
+  route: { method: string; path: string };
+  /** 'body' or 'query' */
+  part: string;
+  issues: DriftIssue[];
+  /** ms epoch */
+  sampledAt: number;
+}
+
+/**
+ * Pluggable drift store interface. The default in-memory store is used
+ * when this is omitted. Implement to plug Redis/Postgres/etc.
+ */
+export interface DriftStore {
+  record(event: DriftEvent): void | Promise<void>;
+  report(): DriftReport | Promise<DriftReport>;
+  reset(): void | Promise<void>;
+}
+
+/**
+ * Aggregated drift snapshot returned by `store.report()` and served at
+ * `GET <docsPath>/drift.json`.
+ */
+export interface DriftReport {
+  generatedAt: number;
+  totalIssues: number;
+  routes: Array<{
+    method: string;
+    path: string;
+    total: number;
+    kinds: Record<string, number>;
+    parts: Record<string, number>;
+    fields: Record<string, number>;
+    firstSeen: number;
+    lastSeen: number;
+    samples: Array<{ sampledAt: number; part: string; issues: DriftIssue[] }>;
+    buckets: Record<string, number>;
+  }>;
+}
+
+/** Drift detection config block (v1.10+). */
+export interface DriftConfig {
+  /** Enable / disable detection. Defaults to `NODE_ENV !== 'production'`. */
+  enabled?: boolean;
+  /** Fraction of mismatching requests to record (0–1). Default 0.01. */
+  sampleRate?: number;
+  /** Per-route sample buffer cap (rolling window). Default 5. */
+  maxSamples?: number;
+  /** HTTP(S) URL to POST drift events to. Fire-and-forget. */
+  webhook?: string;
+  /** Synchronous callback invoked on every recorded drift event. */
+  onDrift?: (event: DriftEvent) => void;
+  /** Replace the default in-memory store (e.g. Redis-backed). */
+  store?: DriftStore;
+  /** `'warn'` (default) prints a console.warn per unique drift signature. `'silent'` suppresses logs. */
+  logLevel?: 'warn' | 'silent';
 }
 
 /** Entry in the OpenAPI `servers` array. */
@@ -232,6 +312,15 @@ export interface NormalizedConfig {
     security: Array<Record<string, string[]>> | null;
   };
   headHtml: string | null;
+  drift: {
+    enabled: boolean;
+    sampleRate: number;
+    maxSamples: number;
+    webhook: string | null;
+    onDrift: ((event: DriftEvent) => void) | null;
+    store: DriftStore | null;
+    logLevel: 'warn' | 'silent';
+  };
 }
 
 /**

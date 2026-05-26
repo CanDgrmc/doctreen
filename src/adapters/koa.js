@@ -15,6 +15,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { createDriftPipeline } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 // Only document these HTTP methods — skip HEAD, OPTIONS (auto-added by @koa/router for GET routes)
@@ -80,7 +81,7 @@ function seedEntry(entry, handler) {
   // 1. defineRoute — highest priority
   if (handler.__docLibSchema) {
     const predef = handler.__docLibSchema;
-    if (entry.requestSchema  === null && predef.request   !== undefined) entry.requestSchema  = predef.request;
+    if (entry.requestSchema  === null && predef.request   !== undefined) { entry.requestSchema  = predef.request; entry.requestSchemaDeclared = true; }
     if (entry.responseSchema === null && predef.response  !== undefined) entry.responseSchema = predef.response;
     if (entry.description    === null && predef.description)             entry.description    = predef.description;
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
@@ -97,7 +98,7 @@ function seedEntry(entry, handler) {
     if (jsDoc) {
       if (entry.description    === null && jsDoc.description) entry.description    = jsDoc.description;
       if (entry.requestHeaders === null && jsDoc.headers)     entry.requestHeaders = jsDoc.headers;
-      if (entry.requestSchema  === null && jsDoc.request)     entry.requestSchema  = jsDoc.request;
+      if (entry.requestSchema  === null && jsDoc.request)     { entry.requestSchema  = jsDoc.request; entry.requestSchemaDeclared = true; }
       if (entry.responseSchema === null && jsDoc.response)    entry.responseSchema = jsDoc.response;
     }
   }
@@ -203,6 +204,9 @@ function koaAdapter(router, userConfig) {
 
   if (!config.enabled) return;
 
+  // Schema drift pipeline (v1.10+). See express adapter for details.
+  config._drift = createDriftPipeline(config);
+
   /** @type {RouteRegistry|null} */
   let cachedRegistry = null;
 
@@ -212,6 +216,32 @@ function koaAdapter(router, userConfig) {
     );
     cachedRegistry = buildRegistrySnapshot(layers, config);
     return cachedRegistry;
+  }
+
+  // ── Schema drift detection (v1.10+) ─────────────────────────────────────
+  // Independent of `validate`. Compares the actual req.body/query against the
+  // declared schema and dispatches sampled events.
+  if (config._drift.enabled) {
+    router.use(async function docLibDrift(ctx, next) {
+      await next();
+      const method = ctx.method.toUpperCase();
+      const path   = ctx.path;
+      if (path === config.docsPath || path === config.docsPath + '/__flows/run') return;
+
+      if (!cachedRegistry) refreshRegistry();
+      const entry = cachedRegistry.findByRequestPath(method, path);
+      if (!entry || !entry.requestSchemaDeclared || !entry.requestSchema) return;
+
+      const route = { method: entry.method, path: entry.path };
+      const body  = ctx.request && ctx.request.body;
+      const query = ctx.query || {};
+      if (entry.requestSchema.body && body && typeof body === 'object') {
+        config._drift.recordIfDrift(route, 'body', entry.requestSchema.body, body);
+      }
+      if (entry.requestSchema.query && query && typeof query === 'object') {
+        config._drift.recordIfDrift(route, 'query', entry.requestSchema.query, query);
+      }
+    });
   }
 
   // ── Runtime validation gate (v1.6+) ─────────────────────────────────────
@@ -253,6 +283,13 @@ function koaAdapter(router, userConfig) {
     if (!cachedRegistry || config.liveReload) refreshRegistry();
     ctx.type = 'application/json';
     ctx.body = buildOpenApiDocument(cachedRegistry.getVisible(), config);
+  });
+
+  router.get(config.docsPath + '/drift.json', async function serveDrift(ctx) {
+    ctx.type = 'application/json';
+    ctx.body = config._drift.enabled
+      ? await Promise.resolve(config._drift.report())
+      : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
   });
 
   router.post(config.docsPath + '/__flows/run', async function runDocsFlow(ctx) {

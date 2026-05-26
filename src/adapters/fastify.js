@@ -15,6 +15,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { createDriftPipeline } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 /**
@@ -115,7 +116,7 @@ function seedEntryFromHandler(entry, handler, nativeSchema) {
   // 1. defineRoute — highest priority
   if (handler && handler.__docLibSchema) {
     const predef = handler.__docLibSchema;
-    if (entry.requestSchema  === null && predef.request   !== undefined) entry.requestSchema  = predef.request;
+    if (entry.requestSchema  === null && predef.request   !== undefined) { entry.requestSchema  = predef.request; entry.requestSchemaDeclared = true; }
     if (entry.responseSchema === null && predef.response  !== undefined) entry.responseSchema = predef.response;
     if (entry.description    === null && predef.description)             entry.description    = predef.description;
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
@@ -140,6 +141,7 @@ function seedEntryFromHandler(entry, handler, nativeSchema) {
           body:  body        ? jsonSchemaToSchemaNode(body)        : null,
           query: querystring ? jsonSchemaToSchemaNode(querystring) : null,
         };
+        entry.requestSchemaDeclared = true;
       }
     }
 
@@ -163,7 +165,7 @@ function seedEntryFromHandler(entry, handler, nativeSchema) {
     if (jsDoc) {
       if (entry.description    === null && jsDoc.description) entry.description    = jsDoc.description;
       if (entry.requestHeaders === null && jsDoc.headers)     entry.requestHeaders = jsDoc.headers;
-      if (entry.requestSchema  === null && jsDoc.request)     entry.requestSchema  = jsDoc.request;
+      if (entry.requestSchema  === null && jsDoc.request)     { entry.requestSchema  = jsDoc.request; entry.requestSchemaDeclared = true; }
       if (entry.responseSchema === null && jsDoc.response)    entry.responseSchema = jsDoc.response;
     }
   }
@@ -205,6 +207,9 @@ function fastifyAdapter(fastify, userConfig) {
   const registry = new RouteRegistry();
 
   if (!config.enabled) return;
+
+  // Schema drift pipeline (v1.10+). See express adapter for details.
+  config._drift = createDriftPipeline(config);
 
   // Capture routes as they are registered
   fastify.addHook('onRoute', function (routeOptions) {
@@ -253,6 +258,29 @@ function fastifyAdapter(fastify, userConfig) {
     }
   });
 
+  // ── Schema drift detection (v1.10+) ─────────────────────────────────────
+  // preHandler runs after body parsing and route matching. We diff the actual
+  // payload against the declared schema and dispatch sampled events to the
+  // pipeline. Runs independently of `validate: true` — drift is observation,
+  // validation is enforcement.
+  fastify.addHook('preHandler', async function driftHook(req) {
+    if (!config._drift.enabled) return;
+    const routeMethod = (req.method || '').toUpperCase();
+    const routePath   = (req.routeOptions && req.routeOptions.url) || req.routerPath || '';
+    if (!routePath) return;
+
+    const entry = registry.find(routeMethod, routePath);
+    if (!entry || !entry.requestSchemaDeclared || !entry.requestSchema) return;
+
+    const route = { method: entry.method, path: entry.path };
+    if (entry.requestSchema.body && req.body && typeof req.body === 'object') {
+      config._drift.recordIfDrift(route, 'body', entry.requestSchema.body, req.body);
+    }
+    if (entry.requestSchema.query && req.query && typeof req.query === 'object') {
+      config._drift.recordIfDrift(route, 'query', entry.requestSchema.query, req.query);
+    }
+  });
+
   // Serve the documentation UI
   fastify.get(config.docsPath, function serveDocs(_req, reply) {
     const html = serveDocsUI(registry.getVisible(), config, { flows: getUiFlows(config) });
@@ -263,6 +291,14 @@ function fastifyAdapter(fastify, userConfig) {
   fastify.get(config.docsPath + '/openapi.json', function serveOpenApi(_req, reply) {
     const doc = buildOpenApiDocument(registry.getVisible(), config);
     reply.header('Content-Type', 'application/json; charset=utf-8').send(doc);
+  });
+
+  // Serve the schema drift report (v1.10+)
+  fastify.get(config.docsPath + '/drift.json', async function serveDrift(_req, reply) {
+    const report = config._drift.enabled
+      ? await Promise.resolve(config._drift.report())
+      : { generatedAt: Date.now(), totalIssues: 0, routes: [] };
+    reply.header('Content-Type', 'application/json; charset=utf-8').send(report);
   });
 
   fastify.post(config.docsPath + '/__flows/run', async function runDocsFlow(req, reply) {
