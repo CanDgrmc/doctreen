@@ -122,6 +122,8 @@ function seedEntryFromHandler(entry, handler, nativeSchema) {
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
+    if (predef.hidden === true)                                          entry.hidden            = true;
+    if (predef.security !== undefined)                                   entry.security          = predef.security;
   }
 
   // 2. Fastify native JSON Schema
@@ -253,13 +255,13 @@ function fastifyAdapter(fastify, userConfig) {
 
   // Serve the documentation UI
   fastify.get(config.docsPath, function serveDocs(_req, reply) {
-    const html = serveDocsUI(registry.getAll(), config, { flows: getUiFlows(config) });
+    const html = serveDocsUI(registry.getVisible(), config, { flows: getUiFlows(config) });
     reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
   });
 
   // Serve the OpenAPI 3.1 document (v1.7+)
   fastify.get(config.docsPath + '/openapi.json', function serveOpenApi(_req, reply) {
-    const doc = buildOpenApiDocument(registry.getAll(), config);
+    const doc = buildOpenApiDocument(registry.getVisible(), config);
     reply.header('Content-Type', 'application/json; charset=utf-8').send(doc);
   });
 

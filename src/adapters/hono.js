@@ -88,6 +88,8 @@ function seedEntry(entry, handler) {
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
+    if (predef.hidden === true)                                          entry.hidden            = true;
+    if (predef.security !== undefined)                                   entry.security          = predef.security;
   }
 
   // 2. JSDoc — fallback when any field is still missing
@@ -216,13 +218,13 @@ function honoAdapter(app, userConfig) {
   app.get(config.docsPath, function serveDocs(c) {
     if (!cachedRegistry || config.liveReload) refreshRegistry();
 
-    const html = serveDocsUI(cachedRegistry.getAll(), config, { flows: getUiFlows(config) });
+    const html = serveDocsUI(cachedRegistry.getVisible(), config, { flows: getUiFlows(config) });
     return c.html(html);
   });
 
   app.get(config.docsPath + '/openapi.json', function serveOpenApi(c) {
     if (!cachedRegistry || config.liveReload) refreshRegistry();
-    const doc = buildOpenApiDocument(cachedRegistry.getAll(), config);
+    const doc = buildOpenApiDocument(cachedRegistry.getVisible(), config);
     return c.json(doc);
   });
 

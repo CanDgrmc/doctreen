@@ -4,6 +4,54 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-05-26
+
+### Added
+
+- **`securitySchemes` + per-route `security`.** OpenAPI security can now
+  be declared once and attached automatically: pass
+  `config.openapi.securitySchemes` to register the schemes (Bearer,
+  ApiKey, OAuth2, …), and `config.openapi.security` for the global
+  default. Per-route overrides with `defineRoute({ security: [...] })`
+  or `@DocRoute({ security: [...] })`; pass `security: []` to mark a
+  route explicitly public when there's a global default. When a route
+  has any effective security requirement, the `Authorization` header
+  is auto-stripped from `parameters[]` so Redocly's `security-defined`
+  rule passes cleanly.
+- **`hidden: true` per route.** `defineRoute({ hidden: true })`,
+  `@DocRoute({ hidden: true })`, or the new `@DocHidden()` shorthand
+  removes a route from the docs UI and the OpenAPI export while
+  leaving it fully reachable at runtime. Useful for internal /
+  experimental endpoints.
+- **`config.openapi.servers`.** Declare your environments once:
+  `{ openapi: { servers: [{ url: 'https://api.example.com', description: 'Prod' }] } }`.
+  Defaults to `[{ url: '/' }]` (same origin as the docs page) when
+  omitted.
+- New `RouteRegistry.getVisible()` returns the same sorted snapshot as
+  `getAll()` minus any entry marked `hidden: true`. The docs UI and
+  the OpenAPI exporter use this; `getAll()` behaviour is unchanged.
+- Type surface tightened: `UserConfig` now declares `validate` (back-
+  filled from v1.6) and the new `openapi` block; `RouteEntry` lists
+  the runtime-attached `requestValidators`, `validateOverride`,
+  `hidden`, and `security` fields; `RouteRegistry` gains type stubs
+  for `getVisible`, `find`, and `findByRequestPath` that the runtime
+  has had since v1.6/v1.8.
+
+### Changed
+
+- Comparison table picks up two new rows (`securitySchemes` /
+  per-route `security`, and hide-a-route).
+- README "OpenAPI Export" section grows three subsections covering
+  servers + security configuration, hidden routes, and a one-block
+  recap of the spec-validation CI hooks.
+- Roadmap reshuffled: v1.8 items ticked; production-grade drift
+  reporting moves up to the next-headline slot.
+
+### Migration
+
+No breaking changes. Hidden / security fields are purely additive and
+default to "no change in behaviour" when omitted.
+
 ## [1.7.0] — 2026-05-26
 
 ### Added

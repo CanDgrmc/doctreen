@@ -106,6 +106,14 @@ function seedEntryFromSchema(entry, docSchema) {
   if (docSchema.validate !== undefined) {
     entry.validateOverride = docSchema.validate;
   }
+
+  if (docSchema.hidden === true) {
+    entry.hidden = true;
+  }
+
+  if (docSchema.security !== undefined) {
+    entry.security = docSchema.security;
+  }
 }
 
 // ─── Route discovery ──────────────────────────────────────────────────────────
@@ -330,6 +338,27 @@ function DocErrors(errors) {
   };
 }
 
+/**
+ * Hide a controller method from the docs UI and the OpenAPI export while
+ * leaving the route fully functional at runtime. Equivalent to
+ * `@DocRoute({ hidden: true })`.
+ *
+ * Merges with any existing `@DocRoute` metadata on the same method.
+ *
+ * @returns {MethodDecorator}
+ */
+function DocHidden() {
+  return function (target, key, descriptor) {
+    const existing = Reflect.getMetadata(DOC_ROUTE_METADATA, descriptor.value) || {};
+    Reflect.defineMetadata(
+      DOC_ROUTE_METADATA,
+      Object.assign({}, existing, { hidden: true }),
+      descriptor.value
+    );
+    return descriptor;
+  };
+}
+
 // ─── Adapter ──────────────────────────────────────────────────────────────────
 
 /**
@@ -383,23 +412,23 @@ function nestAdapter(app, userConfig) {
 
   if (isFastify) {
     httpAdapter.get(config.docsPath, function (req, reply) {
-      const html = serveDocsUI(getRegistry().getAll(), config);
+      const html = serveDocsUI(getRegistry().getVisible(), config);
       reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
     });
     httpAdapter.get(config.docsPath + '/openapi.json', function (req, reply) {
-      const doc = buildOpenApiDocument(getRegistry().getAll(), config);
+      const doc = buildOpenApiDocument(getRegistry().getVisible(), config);
       reply.header('Content-Type', 'application/json; charset=utf-8').send(doc);
     });
   } else {
     // Express (default platform) and any other adapter that uses Node's
     // IncomingMessage / ServerResponse signature.
     httpAdapter.get(config.docsPath, function (req, res) {
-      const html = serveDocsUI(getRegistry().getAll(), config);
+      const html = serveDocsUI(getRegistry().getVisible(), config);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.send(html);
     });
     httpAdapter.get(config.docsPath + '/openapi.json', function (req, res) {
-      const doc = buildOpenApiDocument(getRegistry().getAll(), config);
+      const doc = buildOpenApiDocument(getRegistry().getVisible(), config);
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.send(JSON.stringify(doc, null, 2));
     });
@@ -476,6 +505,7 @@ module.exports = {
   DocRequest,
   DocResponse,
   DocErrors,
+  DocHidden,
   defineRoute,
   defineSchema,
   s,

@@ -72,6 +72,34 @@ export interface RouteSchemas {
    * }
    */
   errors?: Record<number, string | { description?: string | null; schema?: SchemaInput | null }>;
+  /**
+   * Per-route override for runtime validation (v1.6+). Set `true` to force
+   * validation on for this route when the adapter default is off, or `false`
+   * to skip validation when the adapter default is on. Omit to inherit the
+   * adapter setting.
+   */
+  validate?: boolean;
+  /**
+   * Hide this route from the docs UI and the OpenAPI export (v1.8+). The
+   * route remains fully functional at runtime — only the documentation
+   * surface is affected. Useful for internal / admin / experimental
+   * endpoints that should not be discoverable.
+   */
+  hidden?: boolean;
+  /**
+   * OpenAPI security requirement applied to this operation (v1.8+).
+   *
+   * - Omit to inherit the adapter-level `openapi.security` default.
+   * - Pass an empty array `[]` to mark the route explicitly public,
+   *   overriding the global default.
+   * - Pass `[{ schemeName: [...scopes] }]` to require a specific scheme.
+   *
+   * The named schemes must also be declared on the adapter via
+   * `config.openapi.securitySchemes`. When the route has any effective
+   * security requirement, the `Authorization` header (if listed in
+   * `headers`) is automatically omitted from the OpenAPI parameters.
+   */
+  security?: Array<Record<string, string[]>>;
 }
 
 /**
