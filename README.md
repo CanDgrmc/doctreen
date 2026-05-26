@@ -1,11 +1,40 @@
 # DocTreen
 
-Auto-generate and serve interactive API documentation for Express, Fastify, Hono, Koa, and NestJS backends — with zero runtime dependencies and first-class Zod support.
+**One Zod schema per route. Get docs, integration tests, and runtime schema drift detection. No OpenAPI YAML.**
 
-DocTreen introspects your app at startup or first request, reads inline JSDoc or decorator metadata, and serves a self-contained interactive docs UI at the configured `docsPath`. It also ships a request-flow engine for building and running multi-step API sequences directly inside the UI.
+DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder), and it generates an interactive docs UI, runnable integration flows, and Postman exports for **Express, Fastify, Hono, Koa, and NestJS** — no router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
 
 ![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/ss-1.png)
 ![DocTreen UI](https://raw.githubusercontent.com/CanDgrmc/doctreen/main/example/ss-2.png)
+
+---
+
+## Why DocTreen?
+
+Most API doc tools force you to pick one of three trade-offs:
+
+- **Spec-first** (OpenAPI YAML): write the spec, then keep it in sync with code. Spec drifts.
+- **Annotation-heavy** (`@nestjs/swagger`, `swagger-jsdoc`): decorate every property of every DTO. Boilerplate compounds.
+- **Framework-locked** (`ts-rest`, Hono RPC): rewrite your router. Migration pain.
+
+DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (or `@DocRoute` on NestJS) once, and you get:
+
+- An interactive docs UI at `/docs` — zero-dependency HTML, served by the same Node process
+- Runnable integration flows with a CLI runner suitable for CI
+- Postman Collection v2.1 export
+- **Schema Drift Detection (experimental)** — declared schemas are compared against real traffic in development; mismatches log a one-line warning so docs and code stay in sync
+
+## How DocTreen compares
+
+|                          | DocTreen           | `@nestjs/swagger` | Scalar / Redoc    | `ts-rest`        |
+|--------------------------|--------------------|-------------------|-------------------|------------------|
+| Spec file required       | No                 | No                | Yes (OpenAPI)     | No               |
+| Frameworks supported     | 5 adapters         | NestJS only       | Any (spec-only)   | Custom router    |
+| Zod schemas accepted directly | Yes (all adapters) | Manual           | Manual            | Yes              |
+| Integration test runner  | Built-in flows     | No                | No                | No               |
+| Postman export           | Yes                | No                | No                | No               |
+| OpenAPI 3.1 export       | Coming v1.6        | Yes               | Required          | Plugin           |
+| Setup time               | ~5 min             | ~30 min           | ~1 hour           | Refactor router  |
 
 ---
 
@@ -16,6 +45,7 @@ DocTreen introspects your app at startup or first request, reads inline JSDoc or
 - [Configuration](#configuration)
 - [NestJS — Decorator API](#nestjs--decorator-api)
 - [Zod Support](#zod-support)
+- [Schema Drift Detection (experimental)](#schema-drift-detection-experimental)
 - [Request Flows](#request-flows)
 - [Documenting Routes with JSDoc](#documenting-routes-with-jsdoc)
 - [Schema Builder](#schema-builder)
@@ -26,6 +56,7 @@ DocTreen introspects your app at startup or first request, reads inline JSDoc or
 - [TypeScript](#typescript)
 - [How It Works](#how-it-works)
 - [Example Apps](#example-apps)
+- [Roadmap](#roadmap)
 
 ---
 
@@ -317,9 +348,30 @@ All `@Doc*` decorators merge onto the same metadata key — stack any combinatio
 
 ## Zod Support
 
-DocTreen includes a standalone Zod → SchemaNode converter available as `doctreen/zod`. It is used automatically inside the NestJS adapter whenever a Zod schema is passed to `@DocRoute` or any `@Doc*` decorator.
+Zod is a first-class input format on **every adapter**. Pass any Zod schema where DocTreen expects a schema — `defineRoute`, `@DocRoute`, individual `@Doc*` decorators — and it is converted to DocTreen's internal `SchemaNode` representation at definition time. No `zodToSchemaNode()` wrapper required.
 
-### `zodToSchemaNode`
+```js
+const { defineRoute } = require('doctreen/express');
+const { z } = require('zod');
+
+const CreateUser = z.object({ name: z.string(), email: z.string().email() });
+
+app.post('/users', defineRoute(
+  (req, res) => res.status(201).json({ id: 1, ...req.body }),
+  {
+    description: 'Create a user',
+    request:  { body: CreateUser },
+    response: CreateUser.extend({ id: z.number() }),
+    errors:   { 409: 'Email already in use' },
+  }
+));
+```
+
+The same shape works in `doctreen/fastify`, `doctreen/hono`, `doctreen/koa`, and via `@DocRoute({ ... })` in `doctreen/nest`.
+
+If you ever need the converter directly (e.g. to build a shared schema bag outside of an adapter), it remains available as a standalone export.
+
+### `zodToSchemaNode` (standalone)
 
 ```ts
 import { z } from 'zod';
@@ -371,26 +423,29 @@ const node = zodToSchemaNode(schema);
 | `z.lazy(...)` | resolved recursively |
 | `.transform()`, `.pipe()` | unwraps to input schema |
 
-### Using `zodToSchemaNode` with other adapters
+---
 
-While the NestJS adapter handles Zod conversion automatically, you can use `zodToSchemaNode` with any adapter via `defineRoute`:
+## Schema Drift Detection (experimental)
 
-```js
-const { defineRoute } = require('doctreen/express');
-const { zodToSchemaNode } = require('doctreen/zod');
-const { z } = require('zod');
+When a route's request schema is declared via `defineRoute` (or JSDoc) on the Express adapter, DocTreen compares each incoming payload against the declared shape and logs a one-line warning to `console.warn` if they diverge. This is a development aid for catching the most common cause of stale docs: the schema you wrote no longer matches what your code actually accepts.
 
-const CreateUserSchema = z.object({ name: z.string(), email: z.string() });
-
-app.post('/users', defineRoute(
-  (req, res) => res.status(201).json({ id: 1 }),
-  {
-    description: 'Create a user',
-    request:  { body: zodToSchemaNode(CreateUserSchema) },
-    response: zodToSchemaNode(CreateUserSchema.extend({ id: z.number() })),
-  }
-));
+```text
+[doctreen] schema drift on POST /users body: missing required `email`
+[doctreen] schema drift on POST /users body: unexpected `legacy_field` (got string)
+[doctreen] schema drift on POST /users body: `age` expected number, got string
 ```
+
+**What it catches today (top-level shape only):**
+- Missing required properties
+- Unexpected properties not declared in the schema
+- Type mismatches between declared and runtime values
+
+**Properties:**
+- Runs only when `process.env.NODE_ENV !== 'production'`. Silent in production.
+- De-duplicated per `(method, path, drift signature)` so a misbehaving client cannot flood logs.
+- Available on the Express adapter in v1.5. Fastify, Hono, Koa, and NestJS adapters get parallel drift hooks in a follow-up patch.
+
+This is the foundation for production-grade drift reporting on the roadmap — sampling, aggregation, and a dashboard for diffing live traffic against declared schemas. For now, treat it as an early signal during local development.
 
 ---
 
@@ -896,9 +951,10 @@ The structural interfaces (`ExpressLike`, `FastifyLike`, etc.) let you use doctr
 
 1. `expressAdapter(app, config)` returns a middleware registered at `docsPath`.
 2. On the first request to `/docs`, DocTreen walks `app._router.stack` recursively to discover all registered routes — lazy introspection solves the middleware-before-routes ordering problem.
-3. Route handlers are wrapped so real HTTP traffic automatically populates request and response schemas.
+3. Route handlers are wrapped so that, in development, real HTTP traffic can fill in request/response schemas that weren't declared via `defineRoute` or JSDoc. Declared schemas always win; runtime sampling only fills the gaps.
 4. JSDoc comments inside handler functions are parsed via `fn.toString()` at runtime.
-5. If flows are configured, `POST /docs/__flows/run` executes them through the shared runner.
+5. If a route's schema *was* declared, each incoming payload is also compared against it for [schema drift](#schema-drift-detection-experimental) (dev-only warning).
+6. If flows are configured, `POST /docs/__flows/run` executes them through the shared runner.
 
 ### Fastify
 
@@ -957,6 +1013,20 @@ npm run example:nest        # NestJS TS      → http://localhost:3001/docs
 | [`example/koa-app.js`](./example/koa-app.js) | Koa | JSDoc, `defineRoute`, `@koa/router` |
 | [`example/koa-app.ts`](./example/koa-app.ts) | Koa | Fully typed with `Router.RouterContext` |
 | [`example/nest-app.ts`](./example/nest-app.ts) | NestJS | `@DocRoute`, `@Doc*` decorators, Zod schemas, `s` builder |
+
+---
+
+## Roadmap
+
+- [ ] **OpenAPI 3.1 export** — `GET /docs/openapi.json` so the same schema bag drives Scalar, Redoc, and Swagger UI alongside DocTreen's built-in UI. *Next release.*
+- [ ] **Runtime validation middleware** — opt into Zod `.parse()` on the same schema you declared for docs. One schema, three uses: docs, validation, drift detection.
+- [ ] **Schema drift detection — production grade** — sampling, aggregation, and a dashboard view of declared vs. observed schemas. Extension of the v1.5 experimental dev warning.
+- [ ] **Drift hooks on Fastify, Hono, Koa, NestJS** — port the v1.5 Express drift check to every adapter.
+- [ ] **`doctreen init` CLI** — scaffold a `doctreen-flows/` directory with an example flow and a CI-ready runner config.
+- [ ] **DocTreen Cloud** — hosted docs portal with versioning, custom domains, and CI flow monitoring (private beta).
+- [ ] **Python (FastAPI) and Go (chi / gin) adapters** — long-term, after the Node story is fully baked.
+
+Have a feature request or use case we missed? [Open an issue →](https://github.com/CanDgrmc/doctreen/issues)
 
 ---
 

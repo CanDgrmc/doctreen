@@ -1,7 +1,7 @@
 {
   "name": "doctreen",
   "version": "1.4.3",
-  "description": "Auto-generates and serves API documentation for Node.js backends via middleware",
+  "description": "Code-first API docs + integration tests for Node.js. Define routes once with Zod and get docs, runnable flows, and schema drift detection for Express, Fastify, Hono, Koa, and NestJS.",
   "main": "src/index.js",
   "types": "src/index.d.ts",
   "bin": {
@@ -54,14 +54,26 @@
   },
   "keywords": [
     "api",
+    "api-docs",
     "documentation",
+    "code-first",
+    "zod",
+    "schema",
+    "integration-tests",
+    "openapi",
+    "postman",
     "middleware",
     "express",
+    "express-docs",
     "fastify",
+    "fastify-docs",
     "hono",
+    "hono-docs",
     "koa",
+    "koa-docs",
     "nestjs",
-    "auto-docs"
+    "nestjs-docs",
+    "schema-drift"
   ],
   "license": "MIT",
   "repository": {
