@@ -2,7 +2,9 @@
 
 **One Zod schema per route. Get docs, integration tests, *and* runtime validation. No OpenAPI YAML.**
 
-[**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
+[**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
+
+> **What's new in v1.6.0** &nbsp;—&nbsp; **Runtime validation** is here. Flip one flag (`validate: true`) and the same Zod schema that powers your docs now rejects invalid requests with a structured 422 before they reach your handler. Works on Express, Fastify, Hono, Koa, and NestJS. **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.6.0)**
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder), and it generates an interactive docs UI, runnable integration flows, and Postman exports for **Express, Fastify, Hono, Koa, and NestJS** — no router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
 
