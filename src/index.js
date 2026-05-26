@@ -115,6 +115,49 @@ class RouteRegistry {
   }
 
   /**
+   * Look up a registered route by HTTP method + exact path. Returns null when
+   * no match exists. Used by adapter request-time hooks (e.g. Fastify's
+   * preHandler) to resolve the entry attached to the current request.
+   *
+   * @param {string} method
+   * @param {string} path
+   * @returns {RouteEntry|null}
+   */
+  find(method, path) {
+    const m = String(method || '').toUpperCase();
+    for (let i = 0; i < this._routes.length; i++) {
+      const r = this._routes[i];
+      if (r.method === m && r.path === path) return r;
+    }
+    return null;
+  }
+
+  /**
+   * Look up a registered route by HTTP method + concrete request URL path,
+   * matching `:params` against actual segments. Use this from middleware that
+   * sees the live request path (e.g. Hono / Koa) — `find()` requires the exact
+   * route pattern. Returns the first matching entry or null.
+   *
+   * @param {string} method
+   * @param {string} actualPath
+   * @returns {RouteEntry|null}
+   */
+  findByRequestPath(method, actualPath) {
+    const m = String(method || '').toUpperCase();
+    for (let i = 0; i < this._routes.length; i++) {
+      const r = this._routes[i];
+      if (r.method !== m) continue;
+      if (r.path === actualPath) return r;
+      // Skip the regex build for paths without ":params" — exact compare above.
+      if (r.path.indexOf(':') === -1) continue;
+      const escaped = r.path.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const withParams = escaped.replace(/:\w+/g, '[^/]+');
+      if (new RegExp('^' + withParams + '$').test(actualPath)) return r;
+    }
+    return null;
+  }
+
+  /**
    * Return a sorted, read-only snapshot of all registered routes.
    * Sorted by path then method for stable UI rendering.
    * @returns {RouteEntry[]}

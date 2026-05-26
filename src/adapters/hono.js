@@ -14,6 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
+const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
 
 // Only document these HTTP methods — skip ALL, OPTIONS, HEAD (internal/auto-added)
 const HTTP_METHODS_TO_DOCUMENT = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -84,6 +85,8 @@ function seedEntry(entry, handler) {
     if (entry.description    === null && predef.description)             entry.description    = predef.description;
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
+    if (predef.validators)                                               entry.requestValidators = predef.validators;
+    if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
   }
 
   // 2. JSDoc — fallback when any field is still missing
@@ -174,14 +177,43 @@ function honoAdapter(app, userConfig) {
   /** @type {RouteRegistry|null} */
   let cachedRegistry = null;
 
+  function refreshRegistry() {
+    const appRoutes = (app.routes || []).filter(
+      (r) => r.path !== config.docsPath && r.path !== config.docsPath + '/__flows/run'
+    );
+    cachedRegistry = buildRegistrySnapshot(appRoutes, config);
+    return cachedRegistry;
+  }
+
+  // ── Runtime validation gate (v1.6+) ─────────────────────────────────────
+  // Register a global middleware before routes are added so it joins the
+  // chain for every subsequent route. Users must call honoAdapter BEFORE
+  // their routes when `validate: true` — Hono does not retro-apply
+  // middleware to routes registered earlier.
+  if (config.validate) {
+    app.use('*', async function (c, next) {
+      const method = c.req.method;
+      const path   = c.req.path;
+      if (path === config.docsPath || path === config.docsPath + '/__flows/run') return next();
+
+      if (!cachedRegistry || config.liveReload) refreshRegistry();
+      const entry = cachedRegistry.findByRequestPath(method, path);
+      if (!entry || !entry.requestValidators) return next();
+      if (!shouldValidate(config.validate, entry.validateOverride)) return next();
+
+      let body;
+      try { body = await c.req.json(); } catch (_) { body = undefined; }
+      const url = new URL(c.req.url);
+      const query = Object.fromEntries(url.searchParams);
+
+      const result = await validateRequest(entry.requestValidators, { body: body, query: query });
+      if (!result.ok) return c.json(buildErrorBody(result.issues), 422);
+      return next();
+    });
+  }
+
   app.get(config.docsPath, function serveDocs(c) {
-    if (!cachedRegistry || config.liveReload) {
-      // Filter out the docs route itself so it doesn't appear in the route list
-      const appRoutes = (app.routes || []).filter(
-        (r) => r.path !== config.docsPath && r.path !== config.docsPath + '/__flows/run'
-      );
-      cachedRegistry = buildRegistrySnapshot(appRoutes, config);
-    }
+    if (!cachedRegistry || config.liveReload) refreshRegistry();
 
     const html = serveDocsUI(cachedRegistry.getAll(), config, { flows: getUiFlows(config) });
     return c.html(html);

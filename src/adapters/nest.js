@@ -5,6 +5,12 @@
 const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = require('../index');
 const { serveDocsUI } = require('../ui/index');
 const { convertSchema, normalizeRouteSchemas } = require('../internal/schemas');
+const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+
+/** Duck-type check for "this is a Zod schema instance". */
+function isZodInstance(v) {
+  return v != null && typeof v === 'object' && v._def && v._def.typeName;
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -73,6 +79,12 @@ function seedEntryFromSchema(entry, docSchema) {
       body: convertSchema(docSchema.request.body) || null,
       query: convertSchema(docSchema.request.query) || null,
     };
+    // Preserve original Zod schemas (when present) for v1.6+ runtime validation.
+    const validatorBody  = isZodInstance(docSchema.request.body)  ? docSchema.request.body  : null;
+    const validatorQuery = isZodInstance(docSchema.request.query) ? docSchema.request.query : null;
+    if (validatorBody || validatorQuery) {
+      entry.requestValidators = { body: validatorBody, query: validatorQuery };
+    }
   }
 
   if (docSchema.response != null) {
@@ -88,6 +100,10 @@ function seedEntryFromSchema(entry, docSchema) {
         schema: typeof val === 'object' && val && val.schema ? convertSchema(val.schema) : null,
       };
     });
+  }
+
+  if (docSchema.validate !== undefined) {
+    entry.validateOverride = docSchema.validate;
   }
 }
 
@@ -106,7 +122,7 @@ function seedEntryFromSchema(entry, docSchema) {
  *
  * @param {any} app  - INestApplication instance
  * @param {import('../index').NormalizedConfig} config
- * @returns {import('../index').RouteEntry[]}
+ * @returns {import('../index').RouteRegistry}
  */
 function discoverRoutes(app, config) {
   const registry = new RouteRegistry();
@@ -115,11 +131,11 @@ function discoverRoutes(app, config) {
   try {
     container = app.container;
   } catch (_) {
-    return registry.getAll();
+    return registry;
   }
 
   if (!container || typeof container.getModules !== 'function') {
-    return registry.getAll();
+    return registry;
   }
 
   const globalPrefix = normalizeSegment(
@@ -185,7 +201,7 @@ function discoverRoutes(app, config) {
     });
   }
 
-  return registry.getAll();
+  return registry;
 }
 
 // ─── Decorators ───────────────────────────────────────────────────────────────
@@ -350,13 +366,14 @@ function nestAdapter(app, userConfig) {
   const config = normalizeConfig(userConfig);
   if (!config.enabled) return;
 
-  let cachedRoutes = null;
+  /** @type {import('../index').RouteRegistry|null} */
+  let cachedRegistry = null;
 
-  function getRoutes() {
-    if (cachedRoutes === null || config.liveReload) {
-      cachedRoutes = discoverRoutes(app, config);
+  function getRegistry() {
+    if (cachedRegistry === null || config.liveReload) {
+      cachedRegistry = discoverRoutes(app, config);
     }
-    return cachedRoutes;
+    return cachedRegistry;
   }
 
   const httpAdapter = app.getHttpAdapter();
@@ -365,17 +382,60 @@ function nestAdapter(app, userConfig) {
 
   if (isFastify) {
     httpAdapter.get(config.docsPath, function (req, reply) {
-      const html = serveDocsUI(getRoutes(), config);
+      const html = serveDocsUI(getRegistry().getAll(), config);
       reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
     });
   } else {
     // Express (default platform) and any other adapter that uses Node's
     // IncomingMessage / ServerResponse signature.
     httpAdapter.get(config.docsPath, function (req, res) {
-      const html = serveDocsUI(getRoutes(), config);
+      const html = serveDocsUI(getRegistry().getAll(), config);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.send(html);
     });
+  }
+
+  // ── Runtime validation gate (v1.6+) ─────────────────────────────────────
+  // Register a global guard. NestJS guards run after body-parser middleware
+  // (whether the underlying platform is Express or Fastify) but before pipes
+  // and the controller, so `req.body` is reliably parsed by the time we read
+  // it. Going via the guard system also means our 422 response is shaped by
+  // NestJS's HttpException pipeline (compatible with global filters).
+  if (config.validate && typeof app.useGlobalGuards === 'function') {
+    let HttpException = null;
+    try { HttpException = require('@nestjs/common').HttpException; } catch (_) { /* no-op */ }
+
+    const guard = {
+      async canActivate(context) {
+        const req = context.switchToHttp().getRequest();
+        const handler = context.getHandler();
+        const docSchema = handler ? Reflect.getMetadata(DOC_ROUTE_METADATA, handler) : null;
+        if (!docSchema || !docSchema.request) return true;
+
+        const validators = {
+          body:  isZodInstance(docSchema.request.body)  ? docSchema.request.body  : null,
+          query: isZodInstance(docSchema.request.query) ? docSchema.request.query : null,
+        };
+        if (!validators.body && !validators.query) return true;
+
+        const perRoute = docSchema.validate;
+        if (!shouldValidate(config.validate, perRoute)) return true;
+
+        const result = await validateRequest(validators, { body: req.body, query: req.query });
+        if (result.ok) return true;
+
+        const body = buildErrorBody(result.issues);
+        if (HttpException) throw new HttpException(body, 422);
+        // Fallback: write directly to the response when @nestjs/common is not
+        // present (e.g. installed at runtime via an unusual path).
+        const res = context.switchToHttp().getResponse();
+        res.statusCode = 422;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify(body));
+        return false;
+      },
+    };
+    app.useGlobalGuards(guard);
   }
 }
 

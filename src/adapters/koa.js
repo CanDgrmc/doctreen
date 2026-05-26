@@ -14,6 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
+const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
 
 // Only document these HTTP methods — skip HEAD, OPTIONS (auto-added by @koa/router for GET routes)
 const HTTP_METHODS_TO_DOCUMENT = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -83,6 +84,8 @@ function seedEntry(entry, handler) {
     if (entry.description    === null && predef.description)             entry.description    = predef.description;
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
+    if (predef.validators)                                               entry.requestValidators = predef.validators;
+    if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
   }
 
   // 2. JSDoc — fallback when any field is still missing
@@ -200,14 +203,44 @@ function koaAdapter(router, userConfig) {
   /** @type {RouteRegistry|null} */
   let cachedRegistry = null;
 
+  function refreshRegistry() {
+    const layers = (router.stack || []).filter(
+      (layer) => layer.path !== config.docsPath && layer.path !== config.docsPath + '/__flows/run'
+    );
+    cachedRegistry = buildRegistrySnapshot(layers, config);
+    return cachedRegistry;
+  }
+
+  // ── Runtime validation gate (v1.6+) ─────────────────────────────────────
+  // Mount router-level middleware before the user's routes so it joins the
+  // chain for every subsequent route. When `validate: true`, koaAdapter must
+  // be called BEFORE the user's routes — @koa/router does not retro-apply
+  // middleware to already-registered routes.
+  if (config.validate) {
+    router.use(async function docLibValidate(ctx, next) {
+      const method = ctx.method.toUpperCase();
+      const path   = ctx.path;
+      if (path === config.docsPath || path === config.docsPath + '/__flows/run') return next();
+
+      if (!cachedRegistry || config.liveReload) refreshRegistry();
+      const entry = cachedRegistry.findByRequestPath(method, path);
+      if (!entry || !entry.requestValidators) return next();
+      if (!shouldValidate(config.validate, entry.validateOverride)) return next();
+
+      const body  = ctx.request && ctx.request.body;
+      const query = ctx.query || {};
+      const result = await validateRequest(entry.requestValidators, { body: body, query: query });
+      if (!result.ok) {
+        ctx.status = 422;
+        ctx.body   = buildErrorBody(result.issues);
+        return;
+      }
+      return next();
+    });
+  }
+
   router.get(config.docsPath, async function serveDocs(ctx) {
-    if (!cachedRegistry || config.liveReload) {
-      // Filter out the docs route itself so it doesn't appear in the route list
-      const layers = (router.stack || []).filter(
-        (layer) => layer.path !== config.docsPath && layer.path !== config.docsPath + '/__flows/run'
-      );
-      cachedRegistry = buildRegistrySnapshot(layers, config);
-    }
+    if (!cachedRegistry || config.liveReload) refreshRegistry();
 
     ctx.type = 'text/html';
     ctx.body = serveDocsUI(cachedRegistry.getAll(), config, { flows: getUiFlows(config) });

@@ -14,6 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
+const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
 
 /**
  * normalizeErrors
@@ -118,6 +119,8 @@ function seedEntryFromHandler(entry, handler, nativeSchema) {
     if (entry.description    === null && predef.description)             entry.description    = predef.description;
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
+    if (predef.validators)                                               entry.requestValidators = predef.validators;
+    if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
   }
 
   // 2. Fastify native JSON Schema
@@ -222,6 +225,28 @@ function fastifyAdapter(fastify, userConfig) {
       });
 
       seedEntryFromHandler(entry, routeOptions.handler, routeOptions.schema || null);
+    }
+  });
+
+  // ── Runtime validation gate (v1.6+) ─────────────────────────────────────
+  // Global preHandler hook — looks up the matching RouteEntry and runs
+  // validateRequest when the route declared Zod schemas and validation
+  // is on (adapter default or per-route override). Mutating
+  // routeOptions.preHandler from the onRoute hook is not reliable across
+  // Fastify versions because body parsing has not yet wired up; a global
+  // preHandler runs in the standard lifecycle slot where req.body exists.
+  fastify.addHook('preHandler', async function (req, reply) {
+    const routeMethod = (req.method || '').toUpperCase();
+    const routePath   = (req.routeOptions && req.routeOptions.url) || req.routerPath || '';
+    if (!routePath) return;
+
+    const entry = registry.find(routeMethod, routePath);
+    if (!entry || !entry.requestValidators) return;
+    if (!shouldValidate(config.validate, entry.validateOverride)) return;
+
+    const result = await validateRequest(entry.requestValidators, { body: req.body, query: req.query });
+    if (!result.ok) {
+      reply.code(422).send(buildErrorBody(result.issues));
     }
   });
 
