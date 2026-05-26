@@ -32,6 +32,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { diffShape, reportDrift } = require('../internal/drift');
+const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
 
@@ -163,7 +164,7 @@ function layerToPath(layer, prefix) {
  * @param {ExpressHandlerLayer[]} handlerStack - layer.route.stack from Express
  * @param {RouteEntry} entry      - The RouteEntry to attach schemas to
  */
-function wrapRouteHandlers(handlerStack, entry) {
+function wrapRouteHandlers(handlerStack, entry, config) {
   for (const handler of handlerStack) {
     if (!handler.handle || typeof handler.handle !== 'function') continue;
 
@@ -216,6 +217,12 @@ function wrapRouteHandlers(handlerStack, entry) {
       if (entry.errors === null && predef.errors) {
         entry.errors = normalizeErrors(predef.errors);
       }
+      if (predef.validators) {
+        entry.requestValidators = predef.validators;
+      }
+      if (predef.validate !== undefined) {
+        entry.validateOverride = predef.validate;
+      }
     }
 
     // Fallback: parse JSDoc block comment from the handler source.
@@ -242,6 +249,26 @@ function wrapRouteHandlers(handlerStack, entry) {
     handler.handle = function docLibWrappedHandler(req, res, next) {
       const currentEntry = container.entry;
 
+      // ── Runtime validation gate (v1.6+) ─────────────────────────────────
+      if (
+        currentEntry &&
+        currentEntry.requestValidators &&
+        shouldValidate(config && config.validate, currentEntry.validateOverride)
+      ) {
+        return validateRequest(currentEntry.requestValidators, {
+          body:  /** @type {any} */ (req).body,
+          query: /** @type {any} */ (req).query,
+        }).then(function (result) {
+          if (!result.ok) {
+            return /** @type {any} */ (res).status(422).json(buildErrorBody(result.issues));
+          }
+          return runOriginalWithCapture();
+        }).catch(next);
+      }
+
+      return runOriginalWithCapture();
+
+      function runOriginalWithCapture() {
       if (currentEntry) {
         const originalJson = /** @type {any} */ (res).json;
 
@@ -296,6 +323,7 @@ function wrapRouteHandlers(handlerStack, entry) {
       }
 
       return original.call(this, req, res, next);
+      }
     };
 
     handler.handle.__docLibContainer = container;
@@ -337,7 +365,7 @@ function walkStack(stack, prefix, registry, config) {
         });
 
         // Wrap handlers so real traffic populates the schema fields
-        wrapRouteHandlers(route.stack, entry);
+        wrapRouteHandlers(route.stack, entry, config);
       }
     } else if (layer.name === 'router' && layer.handle && layer.handle.stack) {
       const nestedPrefix = layerToPath(layer, prefix).replace(/\/$/, '');
