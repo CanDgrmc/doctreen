@@ -31,6 +31,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, inferSchema, parseJSDoc, 
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
+const { diffShape, reportDrift } = require('../internal/drift');
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
 
@@ -201,6 +202,7 @@ function wrapRouteHandlers(handlerStack, entry) {
       const predef = original.__docLibSchema;
       if (entry.requestSchema === null && predef.request !== undefined) {
         entry.requestSchema = predef.request;
+        entry.requestSchemaDeclared = true;
       }
       if (entry.responseSchema === null && predef.response !== undefined) {
         entry.responseSchema = predef.response;
@@ -224,7 +226,7 @@ function wrapRouteHandlers(handlerStack, entry) {
       if (jsDoc) {
         if (entry.description    === null && jsDoc.description) entry.description    = jsDoc.description;
         if (entry.requestHeaders === null && jsDoc.headers)     entry.requestHeaders = jsDoc.headers;
-        if (entry.requestSchema  === null && jsDoc.request)     entry.requestSchema  = jsDoc.request;
+        if (entry.requestSchema  === null && jsDoc.request)     { entry.requestSchema  = jsDoc.request; entry.requestSchemaDeclared = true; }
         if (entry.responseSchema === null && jsDoc.response)    entry.responseSchema = jsDoc.response;
       }
     }
@@ -266,6 +268,17 @@ function wrapRouteHandlers(handlerStack, entry) {
               }
               if (hasQuery && currentEntry.requestSchema.query === null) {
                 currentEntry.requestSchema.query = inferSchema(reqQuery);
+              }
+
+              // ── Schema drift detection (experimental, dev-only) ──────────
+              if (currentEntry.requestSchemaDeclared && process.env.NODE_ENV !== 'production') {
+                const route = { method: currentEntry.method, path: currentEntry.path };
+                if (hasBody && currentEntry.requestSchema.body) {
+                  reportDrift(route, 'body', diffShape(currentEntry.requestSchema.body, reqBody));
+                }
+                if (hasQuery && currentEntry.requestSchema.query) {
+                  reportDrift(route, 'query', diffShape(currentEntry.requestSchema.query, reqQuery));
+                }
               }
             }
 
