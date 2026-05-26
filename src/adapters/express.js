@@ -33,6 +33,7 @@ const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { diffShape, reportDrift } = require('../internal/drift');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { buildOpenApiDocument } = require('../exporters/openapi');
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
 
@@ -470,6 +471,16 @@ function expressAdapter(app, userConfig = {}) {
           res.statusCode = 400;
           res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
         });
+      return;
+    }
+
+    const openApiPath = config.docsPath + '/openapi.json';
+    if (req.path === openApiPath || req.url === openApiPath) {
+      if (config.liveReload) introspectExpressApp(app, registry, config);
+      const doc = buildOpenApiDocument(registry.getAll(), config);
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.statusCode = 200;
+      res.end(JSON.stringify(doc, null, 2));
       return;
     }
 

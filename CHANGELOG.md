@@ -4,6 +4,58 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] — 2026-05-26
+
+### Added
+
+- **OpenAPI 3.1 export.** Every adapter now serves the OpenAPI 3.1
+  document at `<docsPath>/openapi.json`, and the docs UI ships with a
+  one-click "Export to OpenAPI 3.1" download button next to "Export to
+  Postman". The spec is built from the same Zod-or-`s`-builder schemas
+  that already drive the UI, so there is no separate annotation or
+  spec file to maintain. Drop the document into Scalar, Redoc, Swagger
+  UI, editor.swagger.io, or any other spec-driven tool and it renders
+  immediately.
+- New `src/exporters/openapi.js` module exposing
+  `buildOpenApiDocument(routes, config)` for use outside the adapter
+  (e.g. generating the spec at build time).
+- Spec includes path parameters (`:id` → `{id}`), query parameters
+  derived from `request.query`, request headers as
+  `parameters[].in = header`, JSON request body with `required[]`
+  derived from the Zod schema, 200 / 201 success responses (201 for
+  POST), every declared error response with its own schema, and tags
+  grouped by the first non-empty path segment.
+- A relative `servers: [{ url: '/' }]` default so Swagger UI's
+  "Try it out" works against the live host without manual config.
+
+### Changed
+
+- Comparison table in README marks OpenAPI 3.1 export as "Yes
+  (built-in)".
+- Roadmap reshuffled: validation and OpenAPI both ticked off;
+  next big items are first-class `openapi.servers` config +
+  `securitySchemes` and production-grade drift reporting.
+- README opens with a new bullet pointing at the OpenAPI export
+  alongside the docs UI / runtime validation lines, and a new
+  "OpenAPI Export" section walks through the curl command + how to
+  paste into a renderer.
+
+### Out of scope (deferred to v1.8+)
+
+- `securitySchemes` / `security` declarations — `Authorization` and
+  similar headers currently render as plain `parameters[].in = header`
+  entries, which Redocly's `security-defined` lint rule flags as a
+  best-practice violation. The document still passes the official
+  OpenAPI 3.1 schema (`@apidevtools/swagger-cli` validates it).
+- `callbacks`, `webhooks`, `links`.
+- `$ref`-based schema deduplication — every schema is inlined.
+
+### Migration
+
+No breaking changes. The new endpoint is additive; existing routes are
+untouched. Existing v1.5 / v1.6 user code keeps working without
+modification.
+
 ## [1.6.1] — 2026-05-26
 
 <!-- whatsnew-skip -->

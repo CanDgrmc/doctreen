@@ -15,6 +15,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { buildOpenApiDocument } = require('../exporters/openapi');
 
 // Only document these HTTP methods — skip ALL, OPTIONS, HEAD (internal/auto-added)
 const HTTP_METHODS_TO_DOCUMENT = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -217,6 +218,12 @@ function honoAdapter(app, userConfig) {
 
     const html = serveDocsUI(cachedRegistry.getAll(), config, { flows: getUiFlows(config) });
     return c.html(html);
+  });
+
+  app.get(config.docsPath + '/openapi.json', function serveOpenApi(c) {
+    if (!cachedRegistry || config.liveReload) refreshRegistry();
+    const doc = buildOpenApiDocument(cachedRegistry.getAll(), config);
+    return c.json(doc);
   });
 
   app.post(config.docsPath + '/__flows/run', async function runDocsFlow(c) {

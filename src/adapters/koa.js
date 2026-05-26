@@ -15,6 +15,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { buildOpenApiDocument } = require('../exporters/openapi');
 
 // Only document these HTTP methods — skip HEAD, OPTIONS (auto-added by @koa/router for GET routes)
 const HTTP_METHODS_TO_DOCUMENT = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -244,6 +245,12 @@ function koaAdapter(router, userConfig) {
 
     ctx.type = 'text/html';
     ctx.body = serveDocsUI(cachedRegistry.getAll(), config, { flows: getUiFlows(config) });
+  });
+
+  router.get(config.docsPath + '/openapi.json', async function serveOpenApi(ctx) {
+    if (!cachedRegistry || config.liveReload) refreshRegistry();
+    ctx.type = 'application/json';
+    ctx.body = buildOpenApiDocument(cachedRegistry.getAll(), config);
   });
 
   router.post(config.docsPath + '/__flows/run', async function runDocsFlow(ctx) {
