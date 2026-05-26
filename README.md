@@ -5,7 +5,7 @@
 [**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.8.0** &nbsp;—&nbsp; **`securitySchemes` + per-route `security`.** OpenAPI security can now be declared once and attached automatically: pass `config.openapi.securitySchemes` to register the schemes (Bearer, ApiKey, OAuth2, …), and `config.openapi.security`… **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.8.0)**
+> **What's new in v1.9.0** &nbsp;—&nbsp; **`headHtml` config option.** Pass a raw HTML string and DocTreen appends it to the docs UI `<head>` — useful for analytics scripts (Vercel Analytics, Plausible, PostHog), favicons, custom theme-color / OG / Twitter meta tags, branded we… **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.9.0)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder), and it generates an interactive docs UI, runnable integration flows, and Postman exports for **Express, Fastify, Hono, Koa, and NestJS** — no router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
