@@ -86,6 +86,20 @@ export interface RouteSchemas {
    * endpoints that should not be discoverable.
    */
   hidden?: boolean;
+  /**
+   * OpenAPI security requirement applied to this operation (v1.8+).
+   *
+   * - Omit to inherit the adapter-level `openapi.security` default.
+   * - Pass an empty array `[]` to mark the route explicitly public,
+   *   overriding the global default.
+   * - Pass `[{ schemeName: [...scopes] }]` to require a specific scheme.
+   *
+   * The named schemes must also be declared on the adapter via
+   * `config.openapi.securitySchemes`. When the route has any effective
+   * security requirement, the `Authorization` header (if listed in
+   * `headers`) is automatically omitted from the OpenAPI parameters.
+   */
+  security?: Array<Record<string, string[]>>;
 }
 
 /**

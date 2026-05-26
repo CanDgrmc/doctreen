@@ -134,17 +134,34 @@ function queryParameters(querySchemaNode) {
 }
 
 /**
+ * Header names that should be omitted from `parameters[]` when an operation
+ * has an effective `security` requirement — they are already conveyed by the
+ * security scheme. Comparison is case-insensitive.
+ *
+ * Currently only `Authorization` is auto-stripped; cookie / apiKey schemes
+ * may declare arbitrary header names, so future versions can grow this list
+ * by reading from `securitySchemes` directly.
+ */
+const SECURITY_HEADER_BLOCKLIST = ['authorization'];
+
+/**
  * Convert documented request headers (Record<string, string>) into OpenAPI
  * `parameters[]` with `in: header`. The string value is treated as the
  * example / description for the header.
  *
+ * When `stripAuth` is true (route has an effective `security` declaration),
+ * known auth headers like `Authorization` are omitted so the security
+ * scheme is the single source of truth.
+ *
  * @param {Record<string,string>|null} headers
+ * @param {boolean} stripAuth
  * @returns {Array<object>}
  */
-function headerParameters(headers) {
+function headerParameters(headers, stripAuth) {
   if (!headers || typeof headers !== 'object') return [];
   const out = [];
   for (const name of Object.keys(headers)) {
+    if (stripAuth && SECURITY_HEADER_BLOCKLIST.indexOf(name.toLowerCase()) !== -1) continue;
     out.push({
       name:        name,
       in:          'header',
@@ -160,9 +177,10 @@ function headerParameters(headers) {
  * Build the `parameters[]` array for one route — path + query + header.
  *
  * @param {object} entry
+ * @param {boolean} stripAuthHeaders
  * @returns {Array<object>}
  */
-function buildParameters(entry) {
+function buildParameters(entry, stripAuthHeaders) {
   const out = [];
   // Path parameters — always required by OpenAPI spec.
   for (const param of entry.params || []) {
@@ -177,9 +195,26 @@ function buildParameters(entry) {
     const q = queryParameters(entry.requestSchema.query);
     for (let i = 0; i < q.length; i++) out.push(q[i]);
   }
-  const h = headerParameters(entry.requestHeaders);
+  const h = headerParameters(entry.requestHeaders, stripAuthHeaders);
   for (let i = 0; i < h.length; i++) out.push(h[i]);
   return out;
+}
+
+/**
+ * Resolve the effective `security` requirement for an entry, applying the
+ * per-route override on top of the adapter-level default.
+ *
+ * Returns `null` when the route inherits the (possibly absent) global
+ * default — let the caller emit no per-operation `security` so the spec
+ * stays compact.
+ *
+ * @param {object} entry
+ * @param {object} openapiCfg
+ * @returns {Array|null}
+ */
+function effectiveSecurity(entry, openapiCfg) {
+  if (entry.security !== undefined) return entry.security; // includes [] (explicit public)
+  return (openapiCfg && Array.isArray(openapiCfg.security)) ? openapiCfg.security : null;
 }
 
 /**
@@ -237,8 +272,9 @@ function buildResponses(entry) {
  * @returns {object}             - the OpenAPI document, JSON-serializable
  */
 function buildOpenApiDocument(routes, config) {
-  const cfg  = config || {};
-  const meta = cfg.meta || {};
+  const cfg        = config || {};
+  const meta       = cfg.meta || {};
+  const openapiCfg = cfg.openapi || {};
 
   /** @type {Record<string, Record<string, object>>} */
   const paths = {};
@@ -253,10 +289,13 @@ function buildOpenApiDocument(routes, config) {
     const openApiPath = toOpenApiPath(entry.path);
     if (!paths[openApiPath]) paths[openApiPath] = {};
 
+    const security = effectiveSecurity(entry, openapiCfg);
+    const hasSec   = Array.isArray(security) && security.length > 0;
+
     const operation = {
       operationId: operationIdFor(entry.method, entry.path),
       tags:        [tagFor(entry.path)],
-      parameters:  buildParameters(entry),
+      parameters:  buildParameters(entry, hasSec),
       responses:   buildResponses(entry),
     };
 
@@ -270,6 +309,15 @@ function buildOpenApiDocument(routes, config) {
     const body = buildRequestBody(entry);
     if (body) operation.requestBody = body;
 
+    // Per-route security override emits an explicit `security` field (which
+    // can be an empty array to mark a route public when there's a global
+    // default). When no per-route override exists, the top-level
+    // `doc.security` (if any) applies implicitly — no per-operation entry
+    // needed, keeping the spec compact.
+    if (entry.security !== undefined) {
+      operation.security = entry.security;
+    }
+
     paths[openApiPath][entry.method.toLowerCase()] = operation;
   }
 
@@ -279,13 +327,22 @@ function buildOpenApiDocument(routes, config) {
       title:   meta.title   || 'API Documentation',
       version: meta.version || '1.0.0',
     },
-    // `/` means "same origin as the docs page" — tools like Swagger UI use
-    // this for their built-in "Try it out" feature. Users can override via
-    // the new `openapi.servers` config option once we expose it.
-    servers: [{ url: '/' }],
+    // Defaults to `[{ url: '/' }]` via normalizeConfig so Swagger UI's
+    // "Try it out" works against the live host. Users override via
+    // `config.openapi.servers`.
+    servers: Array.isArray(openapiCfg.servers) && openapiCfg.servers.length > 0
+      ? openapiCfg.servers
+      : [{ url: '/' }],
     paths: paths,
   };
   if (meta.description) doc.info.description = meta.description;
+
+  if (openapiCfg.securitySchemes && typeof openapiCfg.securitySchemes === 'object') {
+    doc.components = { securitySchemes: openapiCfg.securitySchemes };
+  }
+  if (Array.isArray(openapiCfg.security) && openapiCfg.security.length > 0) {
+    doc.security = openapiCfg.security;
+  }
 
   return doc;
 }

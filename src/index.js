@@ -21,11 +21,15 @@
  */
 
 /**
- * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean }} UserConfig
+ * @typedef {{ url: string, description?: string }} OpenApiServer
+ *
+ * @typedef {{ servers?: OpenApiServer[], securitySchemes?: Record<string, any>, security?: Array<Record<string, string[]>> }} OpenApiConfig
+ *
+ * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean, openapi?: OpenApiConfig }} UserConfig
  */
 
 /**
- * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: boolean }} NormalizedConfig
+ * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: boolean, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null } }} NormalizedConfig
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -231,7 +235,38 @@ function normalizeConfig(userConfig = {}) {
     flowsPath: userConfig.flowsPath || null,
 
     validate: Boolean(userConfig.validate),
+
+    openapi: normalizeOpenApiConfig(userConfig.openapi),
   };
+}
+
+/**
+ * Normalise the nested `openapi` config block. Always returns a shape with
+ * the three keys (`servers`, `securitySchemes`, `security`) populated so
+ * downstream consumers can read without optional-chain noise.
+ *
+ * @param {OpenApiConfig|undefined} input
+ */
+function normalizeOpenApiConfig(input) {
+  const cfg = input && typeof input === 'object' ? input : {};
+
+  const servers = Array.isArray(cfg.servers) && cfg.servers.length > 0
+    ? cfg.servers.map(function (s) {
+        if (typeof s === 'string') return { url: s };
+        return Object.assign({}, s);
+      })
+    : [{ url: '/' }];
+
+  const securitySchemes =
+    cfg.securitySchemes && typeof cfg.securitySchemes === 'object'
+      ? cfg.securitySchemes
+      : null;
+
+  const security = Array.isArray(cfg.security) && cfg.security.length > 0
+    ? cfg.security
+    : null;
+
+  return { servers: servers, securitySchemes: securitySchemes, security: security };
 }
 
 /**

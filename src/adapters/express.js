@@ -227,6 +227,9 @@ function wrapRouteHandlers(handlerStack, entry, config) {
       if (predef.hidden === true) {
         entry.hidden = true;
       }
+      if (predef.security !== undefined) {
+        entry.security = predef.security;
+      }
     }
 
     // Fallback: parse JSDoc block comment from the handler source.

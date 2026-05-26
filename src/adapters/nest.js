@@ -110,6 +110,10 @@ function seedEntryFromSchema(entry, docSchema) {
   if (docSchema.hidden === true) {
     entry.hidden = true;
   }
+
+  if (docSchema.security !== undefined) {
+    entry.security = docSchema.security;
+  }
 }
 
 // ─── Route discovery ──────────────────────────────────────────────────────────

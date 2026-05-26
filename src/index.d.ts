@@ -77,6 +77,17 @@ export interface RouteEntry {
    * Set via `defineRoute`'s `errors` field. null if not provided.
    */
   errors: ErrorEntry[] | null;
+  /**
+   * Original Zod schemas (v1.6+) captured by `normalizeRouteSchemas` for
+   * runtime validation. `SchemaNode` versions live in `requestSchema`.
+   */
+  requestValidators?: { body: unknown | null; query: unknown | null };
+  /** Per-route validation override (v1.6+). undefined → inherit adapter default. */
+  validateOverride?: boolean;
+  /** When true, this route is omitted from the docs UI and OpenAPI export (v1.8+). */
+  hidden?: boolean;
+  /** Per-route OpenAPI `security` requirement (v1.8+). Empty array marks the route explicitly public. */
+  security?: Array<Record<string, string[]>>;
 }
 
 /**
@@ -141,6 +152,54 @@ export interface UserConfig {
    * Each `*.json` file is treated as a flow definition.
    */
   flowsPath?: string;
+
+  /**
+   * When `true`, requests are validated against the declared Zod schema
+   * before the handler executes. Invalid requests are rejected with a
+   * structured 422 response. Available on every adapter (v1.6+).
+   * @default false
+   */
+  validate?: boolean;
+
+  /** OpenAPI-specific options applied to `<docsPath>/openapi.json` (v1.7+). */
+  openapi?: OpenApiConfig;
+}
+
+/** Entry in the OpenAPI `servers` array. */
+export interface OpenApiServer {
+  url: string;
+  description?: string;
+  variables?: Record<string, { default: string; description?: string; enum?: string[] }>;
+}
+
+/** Nested OpenAPI configuration block (v1.7+). */
+export interface OpenApiConfig {
+  /**
+   * `servers` array emitted into the OpenAPI document. Defaults to
+   * `[{ url: '/' }]` (same origin as the docs page) so Swagger UI's
+   * "Try it out" works against the live host.
+   */
+  servers?: OpenApiServer[];
+  /**
+   * Top-level `components.securitySchemes` map. Keys are scheme names
+   * referenced from per-route `security` requirements. Values are
+   * OpenAPI 3.1 Security Scheme Objects. (v1.8+)
+   *
+   * @example
+   * {
+   *   bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+   *   apiKey:     { type: 'apiKey', in: 'header', name: 'x-api-key' },
+   * }
+   */
+  securitySchemes?: Record<string, unknown>;
+  /**
+   * Top-level `security` array — applies to every operation that does
+   * not declare its own `security`. Pass an empty per-route `security: []`
+   * to mark a route explicitly public. (v1.8+)
+   *
+   * @example [{ bearerAuth: [] }]
+   */
+  security?: Array<Record<string, string[]>>;
 }
 
 /**
@@ -155,6 +214,12 @@ export interface NormalizedConfig {
   groups: Record<string, { description: string }>;
   flows: FlowDefinition[] | null;
   flowsPath: string | null;
+  validate: boolean;
+  openapi: {
+    servers: OpenApiServer[];
+    securitySchemes: Record<string, unknown> | null;
+    security: Array<Record<string, string[]>> | null;
+  };
 }
 
 /**
@@ -174,6 +239,28 @@ export declare class RouteRegistry {
    * Sorted by path then method for stable UI rendering.
    */
   getAll(): RouteEntry[];
+
+  /**
+   * Same as `getAll()` but omits entries marked `hidden: true` via
+   * `defineRoute({ hidden: true })` / `@DocRoute({ hidden: true })`.
+   * Use this when feeding routes to the docs UI or OpenAPI exporter so
+   * hidden routes remain functional at runtime but invisible to consumers.
+   * (v1.8+)
+   */
+  getVisible(): RouteEntry[];
+
+  /**
+   * Look up a registered route by HTTP method + exact path pattern.
+   * Returns null when no match exists.
+   */
+  find(method: string, path: string): RouteEntry | null;
+
+  /**
+   * Look up a route by HTTP method + concrete request URL path,
+   * matching `:params` against actual URL segments. Returns null
+   * when no match exists.
+   */
+  findByRequestPath(method: string, actualPath: string): RouteEntry | null;
 
   /** Wipe all entries so the next introspection starts fresh. */
   clear(): void;

@@ -45,6 +45,8 @@ export interface NestRouteSchemas {
   validate?: boolean;
   /** Hide this route from the docs UI and the OpenAPI export (v1.8+). */
   hidden?: boolean;
+  /** OpenAPI security requirement for this operation (v1.8+). See express.d.ts for full notes. */
+  security?: Array<Record<string, string[]>>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

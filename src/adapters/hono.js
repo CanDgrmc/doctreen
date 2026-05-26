@@ -89,6 +89,7 @@ function seedEntry(entry, handler) {
     if (predef.validators)                                               entry.requestValidators = predef.validators;
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
     if (predef.hidden === true)                                          entry.hidden            = true;
+    if (predef.security !== undefined)                                   entry.security          = predef.security;
   }
 
   // 2. JSDoc — fallback when any field is still missing
