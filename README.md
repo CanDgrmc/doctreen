@@ -553,6 +553,26 @@ app.post('/auth/login', defineRoute(handler, {
 
 When a route has any effective `security` requirement (per-route or inherited), DocTreen automatically strips the `Authorization` header from `parameters[]` — the security scheme is the single source of truth, and Redocly's `security-defined` rule passes cleanly.
 
+### Inject custom HTML into the docs `<head>` (v1.9+)
+
+Pass `headHtml` to drop analytics scripts, custom CSS, favicons, OG tags, or web fonts into the docs UI without forking DocTreen:
+
+```js
+expressAdapter(app, {
+  meta: { title: 'My API', version: '1.0.0' },
+  headHtml: [
+    '<script defer src="/_vercel/insights/script.js"></script>',
+    '<script defer src="/_vercel/speed-insights/script.js"></script>',
+    '<link rel="icon" href="/favicon.ico" />',
+    '<meta name="theme-color" content="#0f1117">',
+  ].join('\n'),
+});
+```
+
+The string is appended **as-is** to the generated `<head>`, after DocTreen's built-in styles and before `</head>`. **Trusted input** — DocTreen does not sanitise — so do not pass anything derived from user-submitted data.
+
+The live demo at [doctreen.vercel.app](https://doctreen.vercel.app/docs) uses this to load Vercel Analytics + Speed Insights.
+
 ### Hide a route from the docs (v1.8+)
 
 Some endpoints serve traffic but should not appear in the docs UI or the OpenAPI export — internal admin tools, experimental features, deprecated routes you can't remove yet. Mark them per-route:
@@ -1179,6 +1199,7 @@ npm run example:nest        # NestJS TS      → http://localhost:3001/docs
 - [x] **Runtime validation middleware** *(v1.6)* — Zod schemas validate incoming requests; 422 on mismatch.
 - [x] **OpenAPI 3.1 export** *(v1.7)* — same schema bag now also drives Scalar, Redoc, and Swagger UI via `GET /docs/openapi.json`.
 - [x] **`openapi.servers` + `securitySchemes` + per-route `security` + `hidden`** *(v1.8)* — declare auth schemes once, attach to operations automatically; `Authorization` header auto-stripped; routes can opt out of docs entirely.
+- [x] **`headHtml` config** *(v1.9)* — inject analytics scripts, custom CSS, favicons, or OG metadata into the docs UI `<head>` without forking.
 - [ ] **Schema drift detection — production grade** — sampling, aggregation, and a dashboard view of declared vs. observed schemas. Extension of the v1.5 experimental dev warning.
 - [ ] **Drift hooks on Fastify, Hono, Koa, NestJS** — port the v1.5 Express drift check to every adapter now that the validation rails exist.
 - [ ] **`doctreen init` CLI** — scaffold a `doctreen-flows/` directory with an example flow and a CI-ready runner config.
