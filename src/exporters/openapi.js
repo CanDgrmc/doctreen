@@ -279,6 +279,10 @@ function buildOpenApiDocument(routes, config) {
       title:   meta.title   || 'API Documentation',
       version: meta.version || '1.0.0',
     },
+    // `/` means "same origin as the docs page" — tools like Swagger UI use
+    // this for their built-in "Try it out" feature. Users can override via
+    // the new `openapi.servers` config option once we expose it.
+    servers: [{ url: '/' }],
     paths: paths,
   };
   if (meta.description) doc.info.description = meta.description;
