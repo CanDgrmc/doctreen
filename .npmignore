@@ -1,3 +1,5 @@
 .claude/
 docs
 example
+api
+vercel.json

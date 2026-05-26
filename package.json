@@ -1,6 +1,6 @@
 {
   "name": "doctreen",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "Code-first API docs + integration tests for Node.js. Define routes once with Zod and get docs, runnable flows, and schema drift detection for Express, Fastify, Hono, Koa, and NestJS.",
   "main": "src/index.js",
   "types": "src/index.d.ts",
