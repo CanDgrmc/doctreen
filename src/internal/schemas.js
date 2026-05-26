@@ -23,6 +23,11 @@ function convertSchema(schema) {
  *
  * Mutates and returns a shallow copy — the original object is left untouched.
  *
+ * In addition to producing SchemaNodes for the docs UI, this function preserves
+ * the *original* Zod schemas (when present) in an internal `validators` slot
+ * so that v1.6+ runtime-validation can call `.safeParseAsync()` against the
+ * exact schema the user defined — not the lossy SchemaNode representation.
+ *
  * @param {any} schemas
  * @returns {any}
  */
@@ -31,12 +36,20 @@ function normalizeRouteSchemas(schemas) {
 
   const out = Object.assign({}, schemas);
 
+  // Keep references to original Zod schemas — needed for runtime validation.
+  let originalBody  = null;
+  let originalQuery = null;
+
   if (out.request && typeof out.request === 'object' && !isZodSchema(out.request)) {
+    if (isZodSchema(out.request.body))  originalBody  = out.request.body;
+    if (isZodSchema(out.request.query)) originalQuery = out.request.query;
+
     const req = {};
     if ('body' in out.request)  req.body  = convertSchema(out.request.body);
     if ('query' in out.request) req.query = convertSchema(out.request.query);
     out.request = req;
   } else if (isZodSchema(out.request)) {
+    originalBody = out.request;
     out.request = { body: convertSchema(out.request), query: null };
   }
 
@@ -55,6 +68,12 @@ function normalizeRouteSchemas(schemas) {
       }
     }
     out.errors = normErrors;
+  }
+
+  // Attach validators only when at least one Zod schema was supplied; absence
+  // of this property means "nothing to validate against".
+  if (originalBody || originalQuery) {
+    out.validators = { body: originalBody, query: originalQuery };
   }
 
   return out;
