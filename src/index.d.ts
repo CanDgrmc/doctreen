@@ -163,6 +163,17 @@ export interface UserConfig {
 
   /** OpenAPI-specific options applied to `<docsPath>/openapi.json` (v1.7+). */
   openapi?: OpenApiConfig;
+
+  /**
+   * Raw HTML appended to the docs UI `<head>` (v1.9+). Trusted input —
+   * DocTreen does not sanitise — so do not pass anything derived from
+   * user-submitted data. Typical uses: analytics scripts, custom CSS,
+   * favicon overrides, OG / Twitter meta tags, web fonts.
+   *
+   * @example
+   * headHtml: '<script defer src="/_vercel/insights/script.js"></script>'
+   */
+  headHtml?: string;
 }
 
 /** Entry in the OpenAPI `servers` array. */
@@ -220,6 +231,7 @@ export interface NormalizedConfig {
     securitySchemes: Record<string, unknown> | null;
     security: Array<Record<string, string[]>> | null;
   };
+  headHtml: string | null;
 }
 
 /**

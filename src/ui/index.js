@@ -2026,6 +2026,7 @@ function serveDocsUI(routes, config, options) {
       }
     }
   </style>
+  ${config.headHtml ? config.headHtml : ''}
 </head>
 <body>
 

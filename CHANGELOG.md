@@ -4,6 +4,44 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] — 2026-05-26
+
+### Added
+
+- **`headHtml` config option.** Pass a raw HTML string and DocTreen
+  appends it to the docs UI `<head>` — useful for analytics scripts
+  (Vercel Analytics, Plausible, PostHog), favicons, custom theme-color
+  / OG / Twitter meta tags, branded web fonts, or extra CSS overrides.
+  Trusted input only; DocTreen does not sanitise, so callers must not
+  pipe user-submitted data through this option.
+
+  ```js
+  expressAdapter(app, {
+    headHtml: '<script defer src="/_vercel/insights/script.js"></script>',
+  });
+  ```
+
+  Implementation: `normalizeConfig` defaults `headHtml` to `null`; the
+  generated HTML template emits the string between the built-in
+  `<style>` block and `</head>`.
+
+### Changed
+
+- Live demo (`api/index.js`) now wires up Vercel Analytics + Speed
+  Insights through the new `headHtml` option so the dashboards at
+  vercel.com/can-dgrmcs-projects/doctreen/analytics start collecting
+  /docs traffic once enabled.
+- README gains a new "Inject custom HTML into the docs `<head>`"
+  subsection under OpenAPI Export covering the option, its trust
+  model, and the demo's own usage.
+- Roadmap: v1.9 ticked; production-grade drift detection remains the
+  next headline.
+
+### Migration
+
+No breaking changes. `headHtml` is purely additive; omit it and the
+UI renders exactly as in v1.8.
+
 ## [1.8.0] — 2026-05-26
 
 ### Added

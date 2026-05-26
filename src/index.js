@@ -25,11 +25,11 @@
  *
  * @typedef {{ servers?: OpenApiServer[], securitySchemes?: Record<string, any>, security?: Array<Record<string, string[]>> }} OpenApiConfig
  *
- * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean, openapi?: OpenApiConfig }} UserConfig
+ * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean, openapi?: OpenApiConfig, headHtml?: string }} UserConfig
  */
 
 /**
- * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: boolean, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null } }} NormalizedConfig
+ * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: boolean, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null }} NormalizedConfig
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -237,6 +237,12 @@ function normalizeConfig(userConfig = {}) {
     validate: Boolean(userConfig.validate),
 
     openapi: normalizeOpenApiConfig(userConfig.openapi),
+
+    // Raw HTML appended to <head> of the docs UI. Use for analytics scripts,
+    // custom CSS links, favicon overrides, OG / Twitter meta tags, web fonts,
+    // etc. Trusted input — DocTreen does not sanitise — so do not pass
+    // anything derived from user-submitted data.
+    headHtml: typeof userConfig.headHtml === 'string' ? userConfig.headHtml : null,
   };
 }
 
