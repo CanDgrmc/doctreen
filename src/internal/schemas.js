@@ -76,7 +76,61 @@ function normalizeRouteSchemas(schemas) {
     out.validators = { body: originalBody, query: originalQuery };
   }
 
+  // OpenAPI 3.1 callbacks (v1.11+). Each callback entry can carry its own
+  // request/response/errors schemas, which may be Zod. Recurse so the
+  // OpenAPI exporter sees uniform SchemaNodes only.
+  if (out.callbacks && typeof out.callbacks === 'object') {
+    out.callbacks = normaliseCallbacksBag(out.callbacks);
+  }
+
   return out;
 }
 
-module.exports = { convertSchema, normalizeRouteSchemas };
+/**
+ * Normalise a `{ name: { url, method, request?, response?, errors? } }` bag,
+ * converting any nested Zod schemas to SchemaNodes. Shared between
+ * `defineRoute({ callbacks })` and `config.openapi.webhooks` (which has the
+ * same shape minus the `url`).
+ *
+ * @param {Record<string, any>} bag
+ * @returns {Record<string, any>}
+ */
+function normaliseCallbacksBag(bag) {
+  const out = {};
+  for (const name of Object.keys(bag)) {
+    const cb = bag[name];
+    if (!cb || typeof cb !== 'object') continue;
+    const norm = Object.assign({}, cb);
+
+    if (norm.request && typeof norm.request === 'object' && !isZodSchema(norm.request)) {
+      const req = {};
+      if ('body' in norm.request)  req.body  = convertSchema(norm.request.body);
+      if ('query' in norm.request) req.query = convertSchema(norm.request.query);
+      norm.request = req;
+    } else if (isZodSchema(norm.request)) {
+      norm.request = { body: convertSchema(norm.request), query: null };
+    }
+
+    if ('response' in norm) norm.response = convertSchema(norm.response);
+
+    if (norm.errors && typeof norm.errors === 'object') {
+      const normErrors = {};
+      for (const code of Object.keys(norm.errors)) {
+        const v = norm.errors[code];
+        if (v && typeof v === 'object' && !isZodSchema(v) && 'schema' in v) {
+          normErrors[code] = Object.assign({}, v, { schema: convertSchema(v.schema) });
+        } else if (isZodSchema(v)) {
+          normErrors[code] = { description: null, schema: convertSchema(v) };
+        } else {
+          normErrors[code] = v;
+        }
+      }
+      norm.errors = normErrors;
+    }
+
+    out[name] = norm;
+  }
+  return out;
+}
+
+module.exports = { convertSchema, normalizeRouteSchemas, normaliseCallbacksBag };

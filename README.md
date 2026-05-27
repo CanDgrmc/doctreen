@@ -5,7 +5,7 @@
 [**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.10.1** &nbsp;—&nbsp; **Drift store reset endpoint.** `POST <docsPath>/drift/reset` clears the in-memory store on demand — useful between integration test runs, after deploys, or when a known bad client has finished its run. **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.10.1)**
+> **What's new in v1.11.0** &nbsp;—&nbsp; **`components.schemas` with `$ref` dedup.** Schemas registered via `defineSchema('Name', ...)` are now promoted to `components.schemas.Name` and every occurrence in `requestBody` / `responses` / `parameters` is replaced with `{ $ref: ... **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.11.0)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder), and it generates an interactive docs UI, runnable integration flows, and Postman exports for **Express, Fastify, Hono, Koa, and NestJS** — no router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
@@ -503,17 +503,131 @@ Drop the file (or paste it) into [Scalar](https://docs.scalar.com/), [Redoc](htt
 
 **What's in the spec:**
 
-- GET / POST / PUT / PATCH / DELETE operations grouped by first path segment as tags
+- GET / POST / PUT / PATCH / DELETE operations grouped by tag (per-route `tags` override, otherwise first path segment)
 - Path parameters (`/users/:id` → `/users/{id}`), query parameters from `request.query`, request headers as `parameters[].in = header`
 - JSON request body for POST/PUT/PATCH with `required` arrays derived from the Zod schema
 - 200 / 201 success responses (201 for POST) plus every declared error response with its own schema
-- All schemas inlined so the document is self-contained — no external `$ref` resolution needed
+- **`components.schemas` with `$ref` dedup** (v1.11+) — named schemas from `defineSchema` and repeated anonymous shapes are promoted automatically
+- **`callbacks` per-operation and document-level `webhooks`** (v1.11+)
+- **Multi-example bodies and responses** via `defineRoute({ examples })` (v1.11+)
+- **Top-level `tags` metadata** with descriptions and external docs (v1.11+)
+- **`securitySchemes`, per-route `security`, `hidden` routes** (v1.8+)
 
-**Out of scope for now (v1.8+):**
+### Per-route tags + top-level metadata (v1.11+)
 
-- `securitySchemes` / `security` blocks — request-headers like `Authorization` currently render as parameters
-- `callbacks`, `webhooks`, `links`
-- `$ref`-based schema deduplication (everything is inlined; a few KB heavier but renders identically in every viewer)
+```js
+expressAdapter(app, {
+  openapi: {
+    tags: [
+      { name: 'users',   description: 'User account management' },
+      { name: 'billing', description: 'Invoices + payment methods',
+        externalDocs: { url: 'https://docs.example.com/billing' } },
+    ],
+  },
+});
+
+app.post('/users', defineRoute(handler, {
+  tags: ['users', 'public'],            // overrides the path-segment default
+  // ...
+}));
+```
+
+Tags used by routes but not declared at the top level are still emitted — just without descriptions. The `lint openapi` command warns about undescribed tags so you notice.
+
+### `$ref` schema deduplication (v1.11+)
+
+Wrap a schema with `defineSchema('Name', ...)` and every route that references the same object will share a single `$ref: '#/components/schemas/Name'` entry in the exported spec:
+
+```js
+const { s, defineSchema } = require('doctreen');
+const { defineRoute } = require('doctreen/express');
+
+const User = defineSchema('User', s.object({
+  id:    s.number(),
+  name:  s.string(),
+  email: s.string(),
+}));
+
+app.post('/users',     defineRoute(handler, { request: { body: User }, response: User }));
+app.get('/users/:id',  defineRoute(handler, { response: User }));
+```
+
+Anonymous object schemas with three or more properties that appear two or more times in the spec are also auto-promoted under stable `Schema1`, `Schema2`, … names — you get the dedup benefit without naming every shape.
+
+### Callbacks and webhooks (v1.11+)
+
+OpenAPI 3.1 distinguishes between *callbacks* (per-operation, expressed inline with a runtime expression like `{$request.body#/callbackUrl}`) and *webhooks* (document-level events the server emits).
+
+Per-operation callback:
+
+```js
+app.post('/payments', defineRoute(handler, {
+  description: 'Create a payment',
+  callbacks: {
+    onPaymentSucceeded: {
+      url: '{$request.body#/callbackUrl}',
+      method: 'POST',
+      summary: 'Notify the caller when the payment clears',
+      request:  { body: s.object({ paymentId: s.string() }) },
+      response: s.object({ ok: s.boolean() }),
+    },
+  },
+}));
+```
+
+Document-level webhook (declared once on the adapter config):
+
+```js
+expressAdapter(app, {
+  openapi: {
+    webhooks: {
+      userDeleted: {
+        method: 'POST',
+        summary: 'Fired when a user closes their account',
+        request:  { body: s.object({ userId: s.number(), deletedAt: s.string() }) },
+        response: s.object({ ok: s.boolean() }),
+      },
+    },
+  },
+});
+```
+
+Both reuse the same schema pipeline as routes — Zod schemas are accepted, `$ref` dedup applies.
+
+### Multi-example bodies and responses (v1.11+)
+
+```js
+app.post('/users', defineRoute(handler, {
+  request:  { body: User },
+  response: User,
+  errors:   { 422: 'Validation failed' },
+  examples: {
+    request: {
+      basic: { value: { name: 'Ada',  email: 'ada@example.com' }, summary: 'Minimum' },
+      admin: { value: { name: 'Boss', email: 'boss@x.com', role: 'admin' }, summary: 'With role' },
+    },
+    response:  { id: 1, name: 'Ada', email: 'ada@example.com' },
+    responses: { 422: { value: { errors: ['email is required'] } } },
+  },
+}));
+```
+
+Single values render as OpenAPI `example`; named maps render as `examples`. Aliases: `body` → `request`, `success` → `response`.
+
+### Linting the spec (v1.11+)
+
+```bash
+# Live URL
+npx doctreen lint openapi --url http://localhost:3000/docs
+
+# Local file
+npx doctreen lint openapi --file ./build/openapi.json --fail-on warning
+
+# CI-friendly JSON
+npx doctreen lint openapi --url https://api.example.com/docs --json
+```
+
+Checks duplicate operationIds, missing `info.title` / `info.version`, undeclared path params, untagged operations, missing 4xx responses, undescribed tags, unused `components.schemas`. Exit code 1 when the configured `--fail-on` threshold is reached.
 
 ### Configuring servers, security schemes, and per-route security (v1.8+)
 
@@ -1317,7 +1431,7 @@ Strategy: **go deep, not wide.** Logging, security, auth, and APM stay out of sc
 
 **Next up**
 
-- [ ] **OpenAPI polish** *(v1.11)* — `$ref`-based `components.schemas` dedup, first-class `tags`, `callbacks`/`webhooks`, multi-example, `npx doctreen lint openapi`.
+- [x] **OpenAPI polish** *(v1.11)* — `$ref`-based `components.schemas` dedup (named + auto-anonymous), first-class per-route + top-level `tags`, OpenAPI 3.1 `callbacks` and `webhooks`, multi-example bodies and responses, `npx doctreen lint openapi` (live URL or local file, CI-ready exit codes).
 - [ ] **Mock server** *(v1.12)* — `npx doctreen mock --port 4000` serves a fake API from the registry. Faker-backed examples, latency/error injection, `--from openapi.json` for spec-driven mocking.
 - [ ] **Type & client codegen** *(v1.13)* — `npx doctreen codegen types` and `codegen client` produce typed request/response interfaces and a tRPC-style fetch wrapper. Watch mode for dev.
 - [ ] **AI-native endpoints** *(v1.14)* — `/docs/llm.txt`, `/docs/agents.json`, and `npx doctreen mcp` (Model Context Protocol server) so Claude and other agents discover your API as callable tools.

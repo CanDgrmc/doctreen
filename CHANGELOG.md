@@ -4,6 +4,86 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] — 2026-05-27
+
+### Added
+
+- **`components.schemas` with `$ref` dedup.** Schemas registered via
+  `defineSchema('Name', ...)` are now promoted to
+  `components.schemas.Name` and every occurrence in `requestBody` /
+  `responses` / `parameters` is replaced with `{ $ref: ... }`. Anonymous
+  object schemas with three or more properties that appear in two or
+  more places are also auto-promoted under stable `Schema1`, `Schema2`,
+  … names. The exported spec stays self-contained but no longer ships
+  the same shape inlined dozens of times.
+
+- **Per-route + top-level tags.** `defineRoute({ tags: ['users'] })` and
+  `@DocRoute({ tags: ['users'] })` override the legacy first-path-segment
+  default. Top-level metadata lives at `config.openapi.tags`:
+
+  ```js
+  openapi: {
+    tags: [
+      { name: 'users', description: 'User account management' },
+      { name: 'billing', description: 'Invoices + payment methods' },
+    ],
+  }
+  ```
+
+  Tags used by routes but not declared at the top level are auto-appended
+  without metadata so the spec always validates.
+
+- **OpenAPI 3.1 callbacks + webhooks.** Per-operation callbacks via
+  `defineRoute({ callbacks: { onPaymentSucceeded: { url, method, request, response } } })`,
+  document-level webhooks via `config.openapi.webhooks: { userCreated: { method, request, response } }`.
+  Both reuse the same request/response/error pipeline as routes — Zod or
+  SchemaNode supported, `$ref` dedup applies.
+
+- **Multi-example bodies and responses.**
+
+  ```js
+  defineRoute(handler, {
+    examples: {
+      request: {
+        basic: { value: { ... }, summary: 'Minimum' },
+        admin: { value: { ... }, summary: 'With role' },
+      },
+      response: { id: 1, name: 'Ada' },                  // single example
+      responses: { 422: { value: { errors: [...] } } },  // per-status-code
+    },
+  });
+  ```
+
+  Renders as OpenAPI `example` (single) or `examples` (named map) on the
+  corresponding Media Type Object. Aliases: `body` → `request`,
+  `success` → `response`.
+
+- **`doctreen lint openapi`.** Spectral-lite linter for the exported (or
+  any) OpenAPI 3.x document. Catches duplicate operationIds, missing
+  `info.title`/`version`, undeclared path params, untagged operations,
+  unused `components.schemas` entries, missing 4xx responses, missing
+  tag descriptions.
+
+  ```bash
+  npx doctreen lint openapi --url http://localhost:3000/docs --fail-on warning
+  npx doctreen lint openapi --file ./build/openapi.json --no-info
+  ```
+
+  Exit code 1 when the configured `--fail-on` threshold is reached —
+  drop into CI alongside `drift report`.
+
+### Migration
+
+No breaking changes for existing v1.10.x consumers.
+
+- Specs that previously inlined the same schema multiple times will now
+  see `$ref`s. Spec validators (Spectral, Redocly) handle this natively;
+  custom consumers reading SchemaObjects directly must follow `$ref`s
+  (one extra hop through `components.schemas`).
+- `tagFor()` is no longer exported from `src/exporters/openapi.js`;
+  replaced by `defaultTagFor()`. Public API consumers were unlikely to
+  reach into the exporter directly, but if you did: rename.
+
 ## [1.10.1] — 2026-05-27
 
 ### Added
