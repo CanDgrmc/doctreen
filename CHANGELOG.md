@@ -4,6 +4,73 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] — 2026-05-27
+
+### Added
+
+- **`npx doctreen mock` — spec-driven mock server.** Spin up an
+  Express-backed fake of any OpenAPI 3.x document in seconds:
+
+  ```bash
+  npx doctreen mock --from http://localhost:3000/docs --port 4000
+  npx doctreen mock --from ./openapi.json --latency 100-500 --error-rate 0.1
+  ```
+
+  Routes, schemas, examples, and `$ref`s are read straight from the
+  spec; responses come from the same schema→example generator that
+  powers the docs UI. When `@faker-js/faker` is installed, fields with
+  recognisable names (`email`, `name`, `uuid`, `createdAt`, …) and
+  OpenAPI `format` strings (`uuid`, `email`, `date-time`, `uri`, …) get
+  realistic values — without it, output is a deterministic placeholder.
+
+- **In-memory CRUD short-circuits.** `POST /resource`, `GET /resource`,
+  `GET /resource/:id`, `PUT|PATCH /resource/:id`, `DELETE /resource/:id`
+  share a per-resource store keyed by the first non-version path
+  segment. POST returns 201 with a stamped `id` + `createdAt`; GET reads
+  back what was created. Envelope responses
+  (`{ products: [...], total, filters }`) are handled — the array is
+  swapped in, the rest of the envelope is regenerated from the schema.
+  Pass `--no-crud` to disable and always return synthesised examples.
+  Pass `--persist <file>` to save the store to a JSON file across
+  restarts.
+
+- **Latency + error injection.** `--latency 200` adds a fixed delay,
+  `--latency 100-500` picks a random ms in range. `--error-rate 0.1`
+  returns a randomly-selected declared 4xx/5xx response 10 % of the
+  time — useful for shaking out frontend error paths.
+
+- **`@faker-js/faker` is an optional peer.** doctreen lazy-requires it;
+  install only when you want richer examples. `--no-faker` forces
+  placeholder output even when faker is present.
+
+- **Public schema→example helper.** The internal generator that powered
+  Copy-as-cURL and Postman export is now a first-class export at
+  `doctreen/example`:
+
+  ```js
+  const { generateExample } = require('doctreen/example');
+  generateExample({ type: 'object', properties: { email: { type: 'string', format: 'email' } } });
+  // → { email: 'user@example.com' }  (or a Faker email if installed)
+  ```
+
+  Accepts both doctreen `SchemaNode` and OpenAPI Schema Objects (with
+  `$ref` resolved via the `components` option).
+
+- **Programmatic mock API.** Import `doctreen/mock` to embed the mock
+  server in your own scripts or tests:
+
+  ```js
+  const { startMockFromOpenApi } = require('doctreen/mock');
+  const { server } = await startMockFromOpenApi({ from: './openapi.json', port: 4000 });
+  // …
+  server.close();
+  ```
+
+### Migration
+
+No breaking changes for existing v1.11.x consumers. New exports
+(`doctreen/mock`, `doctreen/example`) are additive.
+
 ## [1.11.0] — 2026-05-27
 
 ### Added

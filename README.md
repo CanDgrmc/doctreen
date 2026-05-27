@@ -5,7 +5,7 @@
 [**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.11.0** &nbsp;—&nbsp; **`components.schemas` with `$ref` dedup.** Schemas registered via `defineSchema('Name', …)` are now promoted to `components.schemas.Name` and every occurrence in `requestBody` / `responses` / `parameters` is replaced with a single `$ref`. **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.11.0)**
+> **What's new in v1.12.0** &nbsp;—&nbsp; **`npx doctreen mock` — spec-driven mock server.** Spin up an Express-backed fake of any OpenAPI 3.x document in seconds: **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.12.0)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder), and it generates an interactive docs UI, runnable integration flows, and Postman exports for **Express, Fastify, Hono, Koa, and NestJS** — no router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
@@ -34,6 +34,7 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 - **`securitySchemes` + per-route `security`** *(v1.8)* — declare auth schemes once, attach them automatically; the spec passes Redocly's `security-defined` rule cleanly
 - **`hidden: true` per route** *(v1.8)* — keep internal endpoints serving traffic but invisible to docs / OpenAPI consumers
 - **`doctreen lint openapi` CLI** *(v1.11)* — Spectral-lite linter for the exported (or any) OpenAPI 3.x doc; CI-ready exit codes
+- **`doctreen mock` CLI** *(v1.12)* — `npx doctreen mock --from <url|file>` serves a spec-driven fake API with CRUD short-circuits, latency / error injection, and optional Faker for realistic values
 - Runnable integration flows with a CLI runner suitable for CI
 - Postman Collection v2.1 export
 - **Runtime validation** — opt in with `validate: true` and invalid requests are rejected with a structured 422 before they reach your handler. Same schema as the docs.
@@ -54,6 +55,7 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 | Hide a route from docs   | Per route + path patterns | No         | Spec edit         | No               |
 | Schema drift detection vs live traffic | Yes (v1.10, CI-ready) | No  | No                | No               |
 | OpenAPI linter (CLI)     | Yes (v1.11)        | No                | Via Spectral      | No               |
+| Spec-driven mock server  | Yes (v1.12)        | No                | No (separate Prism) | No             |
 | Setup time               | ~5 min             | ~30 min           | ~1 hour           | Refactor router  |
 
 ---
@@ -67,6 +69,7 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 - [Zod Support](#zod-support)
 - [Runtime Validation](#runtime-validation)
 - [OpenAPI Export](#openapi-export)
+- [Mock Server](#mock-server-v112)
 - [Schema Drift Detection](#schema-drift-detection)
 - [Request Flows](#request-flows)
 - [Documenting Routes with JSDoc](#documenting-routes-with-jsdoc)
@@ -730,6 +733,78 @@ Hidden routes are filtered out by `RouteRegistry.getVisible()` (used by both the
 npx @redocly/cli lint https://your-api.example.com/docs/openapi.json
 npx @apidevtools/swagger-cli validate https://your-api.example.com/docs/openapi.json
 ```
+
+---
+
+## Mock Server *(v1.12+)*
+
+Spin up an Express-backed fake of your API in seconds — no spec stitching, no manual handler stubs. `doctreen mock` reads any OpenAPI 3.x document (from a live `/docs` URL or a local JSON file) and synthesises responses from each operation's schema.
+
+```bash
+# From a running doctreen-enabled server
+npx doctreen mock --from http://localhost:3000/docs --port 4000
+
+# From an OpenAPI file on disk
+npx doctreen mock --from ./openapi.json --port 4000
+
+# With latency + random error injection (shake out frontend error paths)
+npx doctreen mock --from ./openapi.json --latency 100-500 --error-rate 0.1
+```
+
+**What you get**
+
+- **Schema-faithful responses** generated from each operation's success response. `$ref`, `oneOf`/`anyOf`/`allOf`, `enum`, `const`, `default`, and per-operation `examples` are all respected.
+- **CRUD short-circuits.** When the spec exposes `/resource` + `/resource/:id`, `POST` actually creates a row in an in-memory store, `GET` reads it back, `PATCH`/`PUT` mutate it, `DELETE` removes it. Envelope responses (`{ products: [...], total, filters }`) are detected and the array is swapped in.
+- **Realistic values via Faker** *(optional)*. Install `@faker-js/faker` and fields named `email`, `name`, `uuid`, `createdAt`, … plus OpenAPI `format`s (`uuid`, `email`, `date-time`, `uri`, `ipv4`, …) get realistic values. Without it, output falls back to deterministic placeholders.
+- **Latency + error injection.** `--latency 200` for a fixed delay, `--latency 100-500` for a random range. `--error-rate 0.1` returns a randomly-picked declared 4xx/5xx response 10 % of the time.
+- **Optional persistence.** `--persist ./fixtures.json` writes the in-memory store to disk on every mutation and loads it on restart.
+
+**Flags**
+
+| Flag                  | Purpose                                                                          |
+|-----------------------|----------------------------------------------------------------------------------|
+| `--from <src>`        | URL (auto-appends `/openapi.json`) or local JSON file. Required.                 |
+| `--port <n>`          | Listen port. Default `4000`.                                                     |
+| `--host <addr>`       | Bind address. Default `0.0.0.0`.                                                 |
+| `--latency <ms\|a-b>` | Fixed ms (`200`) or random range (`100-500`).                                    |
+| `--error-rate <p>`    | `0..1` probability of returning a declared error response.                       |
+| `--seed <n>`          | Faker seed for deterministic output.                                             |
+| `--persist <file>`    | JSON file to persist CRUD state across restarts.                                 |
+| `--no-crud`           | Disable in-memory CRUD; always return synthesised examples.                      |
+| `--no-faker`          | Disable Faker even when installed.                                               |
+| `--quiet`             | Suppress per-request log lines.                                                  |
+
+**Programmatic API**
+
+```js
+const { startMockFromOpenApi } = require('doctreen/mock');
+
+const { app, server, routeCount } = await startMockFromOpenApi({
+  from: './openapi.json',
+  port: 4000,
+  latency: [100, 500],
+  errorRate: 0.05,
+});
+
+// later
+server.close();
+```
+
+**Schema → example helper**
+
+The generator powering the mock server (and the docs UI's Copy-as-cURL / Postman buttons) is exported on its own:
+
+```js
+const { generateExample } = require('doctreen/example');
+
+generateExample(
+  { type: 'object', properties: { email: { type: 'string', format: 'email' } } },
+  { faker: true }
+);
+// → { email: 'Ada.Lovelace@example.com' }
+```
+
+Accepts both doctreen `SchemaNode` and OpenAPI Schema Objects. Pass `components` to resolve `$ref`s.
 
 ---
 
@@ -1446,10 +1521,10 @@ Strategy: **go deep, not wide.** Logging, security, auth, and APM stay out of sc
 - [x] **Schema drift detection — production grade** *(v1.10)* — structured pipeline with per-route aggregates and hourly buckets, opt-in sampling (default 1%), `onDrift` callback + webhook dispatch, pluggable `DriftStore` interface, `Drift` tab in the UI with per-route badges, and `npx doctreen drift report --fail-on-mismatch` for CI. All five adapters (Express, Fastify, Hono, Koa, NestJS) emit through the same pipeline.
 - [x] **Drift reset endpoint, daily buckets, Redis store reference** *(v1.10.1)* — opt-in `POST <docsPath>/drift/reset` (gated by `drift.allowReset` + optional `resetToken`), companion `npx doctreen drift reset` CLI, rolling 7-day `dailyBuckets` alongside the hourly 24h buckets, and a complete Redis-backed `DriftStore` reference at `example/drift-redis-store.js`.
 - [x] **OpenAPI polish** *(v1.11)* — `$ref`-based `components.schemas` dedup (named + auto-anonymous), first-class per-route + top-level `tags`, OpenAPI 3.1 `callbacks` and `webhooks`, multi-example bodies and responses, `npx doctreen lint openapi` (live URL or local file, CI-ready exit codes).
+- [x] **Mock server** *(v1.12)* — `npx doctreen mock --from <url|file>` spins up an Express-backed fake API in seconds. Reads routes, schemas, examples, and `$ref`s from the spec; CRUD short-circuits (with envelope detection) for `/resource` and `/resource/:id`; `--latency`, `--error-rate`, `--persist` flags; optional `@faker-js/faker` for realistic values. Public `doctreen/example` and `doctreen/mock` exports.
 
 **Next up**
 
-- [ ] **Mock server** *(v1.12)* — `npx doctreen mock --port 4000` serves a fake API from the registry. Faker-backed examples, latency/error injection, `--from openapi.json` for spec-driven mocking.
 - [ ] **Type & client codegen** *(v1.13)* — `npx doctreen codegen types` and `codegen client` produce typed request/response interfaces and a tRPC-style fetch wrapper. Watch mode for dev.
 - [ ] **AI-native endpoints** *(v1.14)* — `/docs/llm.txt`, `/docs/agents.json`, and `npx doctreen mcp` (Model Context Protocol server) so Claude and other agents discover your API as callable tools.
 - [ ] **Contract testing & spec diff** *(v1.15)* — `npx doctreen verify --against <url>` checks a deployed API against the spec; `npx doctreen diff old.json new.json` surfaces breaking changes with semver hints. GitHub Action included.

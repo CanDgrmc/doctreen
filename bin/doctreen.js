@@ -8,6 +8,8 @@
  *   drift report  --url <docsUrl> [--fail-on-mismatch] [--json] [--min-issues N]
  *   drift reset   --url <docsUrl> [--token <token>] [--json]
  *   lint openapi  (--url <docsUrl> | --file <path>) [--json] [--fail-on warning|error]
+ *   mock          --from <url|file> [--port N] [--latency ms[-ms]] [--error-rate p]
+ *                 [--no-crud] [--no-faker] [--seed N] [--persist <file>] [--quiet]
  *
  * `report` hits `<docsUrl>/drift.json` (or `<docsUrl>` if it already ends in
  * `/drift.json`) and prints a human-readable summary. With `--fail-on-mismatch`
@@ -30,6 +32,7 @@ function printRootUsage() {
   console.error('  drift report   Print a schema drift report from a running server');
   console.error('  drift reset    Clear the in-memory drift store on a running server');
   console.error('  lint openapi   Lint an OpenAPI 3.x document (live URL or local file)');
+  console.error('  mock           Serve a fake API from an OpenAPI document (faker-backed)');
   console.error('');
   console.error('Run `' + PROGRAM + ' <command> --help` for command-specific options.');
 }
@@ -46,6 +49,33 @@ function printLintOpenApiUsage() {
   console.error('  --fail-on <level>     `error` (default) or `warning` — exit code 1 when present');
   console.error('  --json                Print raw JSON output');
   console.error('  --no-info             Suppress `info` severity issues from the table');
+  console.error('  -h, --help            Show this help');
+}
+
+function printMockUsage() {
+  console.error('Usage: ' + PROGRAM + ' mock --from <url|file> [options]');
+  console.error('');
+  console.error('Serve an Express-backed mock API from an OpenAPI 3.x document. Routes,');
+  console.error('schemas, and examples are read from the spec; responses are synthesised');
+  console.error('via the same schema→example generator that powers the docs UI. When');
+  console.error('`@faker-js/faker` is installed, fields with known names (email, name,');
+  console.error('uuid, …) get realistic values; otherwise output is a stable placeholder.');
+  console.error('');
+  console.error('CRUD short-circuits are on by default: POST creates rows in an in-memory');
+  console.error('store keyed by the first non-version path segment; GET / PUT / PATCH /');
+  console.error('DELETE on `/users/:id`-style routes read or mutate that store.');
+  console.error('');
+  console.error('Options:');
+  console.error('  --from <src>          URL (auto-appends /openapi.json) or local JSON file (required)');
+  console.error('  --port <n>            Port to listen on (default 4000)');
+  console.error('  --host <addr>         Host to bind (default 0.0.0.0)');
+  console.error('  --latency <ms|a-b>    Fixed delay or random ms range (e.g. 100-500)');
+  console.error('  --error-rate <p>      0..1 probability of returning a declared error response');
+  console.error('  --seed <n>            Faker seed for deterministic output');
+  console.error('  --persist <file>      JSON file to persist CRUD state across restarts');
+  console.error('  --no-crud             Disable in-memory CRUD (always return schema examples)');
+  console.error('  --no-faker            Disable Faker (use placeholder strings/numbers)');
+  console.error('  --quiet               Suppress per-request log lines');
   console.error('  -h, --help            Show this help');
 }
 
@@ -110,6 +140,30 @@ function parseArgs(argv) {
     }
     return { command: 'drift-help', error: true };
   }
+  if (cmd === 'mock') {
+    const opts = {
+      from: null, port: 4000, host: '0.0.0.0',
+      latency: 0, errorRate: 0, seed: undefined,
+      persist: null, crud: true, faker: undefined,
+      quiet: false,
+    };
+    while (args.length) {
+      const a = args.shift();
+      if (a === '--from') opts.from = args.shift();
+      else if (a === '--port') opts.port = parseInt(args.shift(), 10) || 4000;
+      else if (a === '--host') opts.host = args.shift();
+      else if (a === '--latency') opts.latency = parseLatency(args.shift());
+      else if (a === '--error-rate') opts.errorRate = parseFloat(args.shift()) || 0;
+      else if (a === '--seed') opts.seed = parseInt(args.shift(), 10);
+      else if (a === '--persist') opts.persist = args.shift();
+      else if (a === '--no-crud') opts.crud = false;
+      else if (a === '--no-faker') opts.faker = false;
+      else if (a === '--quiet') opts.quiet = true;
+      else if (a === '-h' || a === '--help') return { command: 'mock-help' };
+      else { console.error('Unknown option: ' + a); return { command: 'mock-help', error: true }; }
+    }
+    return { command: 'mock', opts: opts };
+  }
   if (cmd === 'lint') {
     const sub = args.shift();
     if (sub === 'openapi') {
@@ -129,6 +183,59 @@ function parseArgs(argv) {
     return { command: 'help', error: true };
   }
   return { command: 'help', error: true };
+}
+
+function parseLatency(value) {
+  if (!value) return 0;
+  const m = /^(\d+)\s*-\s*(\d+)$/.exec(value);
+  if (m) return [parseInt(m[1], 10), parseInt(m[2], 10)];
+  return parseInt(value, 10) || 0;
+}
+
+async function runMock(opts) {
+  if (!opts.from) {
+    printMockUsage();
+    process.exit(2);
+  }
+  let mock;
+  try {
+    mock = require('../src/mock');
+  } catch (err) {
+    console.error('Error loading doctreen mock module: ' + err.message);
+    process.exit(2);
+  }
+
+  try {
+    const handle = await mock.startMockFromOpenApi({
+      from: opts.from,
+      port: opts.port,
+      host: opts.host,
+      crud: opts.crud,
+      faker: opts.faker,
+      seed: opts.seed,
+      latency: opts.latency,
+      errorRate: opts.errorRate,
+      persistPath: opts.persist,
+      logRequests: !opts.quiet,
+    });
+    const addr = handle.server.address();
+    const url = 'http://' + (opts.host === '0.0.0.0' ? 'localhost' : opts.host) + ':' + (addr && addr.port || opts.port);
+    process.stdout.write('[doctreen mock] ' + (handle.info.title || 'Mock API') + ' v' + (handle.info.version || '0.0.0') + '\n');
+    process.stdout.write('[doctreen mock] serving ' + handle.routeCount + ' route(s) at ' + url + '\n');
+    if (opts.latency) {
+      process.stdout.write('[doctreen mock] latency: ' + (Array.isArray(opts.latency) ? opts.latency.join('-') + 'ms' : opts.latency + 'ms') + '\n');
+    }
+    if (opts.errorRate) {
+      process.stdout.write('[doctreen mock] error-rate: ' + opts.errorRate + '\n');
+    }
+    if (opts.persist) {
+      process.stdout.write('[doctreen mock] persisting CRUD state to ' + opts.persist + '\n');
+    }
+    process.stdout.write('[doctreen mock] press Ctrl+C to stop\n');
+  } catch (err) {
+    console.error('Error: ' + err.message);
+    process.exit(2);
+  }
 }
 
 async function fetchReport(url) {
@@ -358,6 +465,8 @@ async function main() {
     case 'drift-reset': await runDriftReset(parsed.opts); break;
     case 'lint-openapi-help': printLintOpenApiUsage(); process.exit(parsed.error ? 2 : 0); break;
     case 'lint-openapi': await runLintOpenApi(parsed.opts); break;
+    case 'mock-help': printMockUsage(); process.exit(parsed.error ? 2 : 0); break;
+    case 'mock': await runMock(parsed.opts); break;
     default: printRootUsage(); process.exit(2);
   }
 }

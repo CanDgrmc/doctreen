@@ -1,6 +1,6 @@
 {
   "name": "doctreen",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "description": "Code-first API docs + OpenAPI 3.1 export + integration tests + runtime validation for Node.js. Define routes once with Zod and get docs, runnable flows, 422-on-invalid-request validation, OpenAPI 3.1 export, and schema drift detection for Express, Fastify, Hono, Koa, and NestJS.",
   "main": "src/index.js",
   "types": "src/index.d.ts",
@@ -40,6 +40,14 @@
     "./flows": {
       "types": "./src/flows/index.d.ts",
       "default": "./src/flows/index.js"
+    },
+    "./mock": {
+      "types": "./src/mock/index.d.ts",
+      "default": "./src/mock/index.js"
+    },
+    "./example": {
+      "types": "./src/internal/example.d.ts",
+      "default": "./src/internal/example.js"
     }
   },
   "scripts": {
@@ -52,6 +60,7 @@
     "example:koa": "node example/koa-app.js",
     "example:koa:ts": "npx tsx example/koa-app.ts",
     "example:nest": "npx tsx example/nest-app.ts",
+    "example:mock": "node bin/doctreen.js mock --from http://localhost:3000/docs --port 4000",
     "release:callout": "node scripts/update-release-callout.js",
     "version": "node scripts/update-release-callout.js && git add README.md"
   },
@@ -82,7 +91,10 @@
     "koa-docs",
     "nestjs",
     "nestjs-docs",
-    "schema-drift"
+    "schema-drift",
+    "mock-server",
+    "api-mock",
+    "faker"
   ],
   "license": "MIT",
   "repository": {
@@ -100,9 +112,13 @@
     "is-generator-function": "1.0.7"
   },
   "devDependencies": {
+    "@faker-js/faker": "^10.4.0",
     "@hono/node-server": "^1.13.0",
     "@koa/bodyparser": "^5.1.0",
     "@koa/router": "^13.0.0",
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0",
+    "@nestjs/platform-express": "^10.0.0",
     "@types/express": "^5.0.6",
     "@types/koa": "^2.15.0",
     "@types/koa__router": "^12.0.0",
@@ -110,12 +126,9 @@
     "fastify": "^5.8.4",
     "hono": "^4.7.0",
     "koa": "^2.15.0",
-    "tsx": "^4.21.0",
-    "@nestjs/common": "^10.0.0",
-    "@nestjs/core": "^10.0.0",
-    "@nestjs/platform-express": "^10.0.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0",
+    "tsx": "^4.21.0",
     "zod": "^3.22.0"
   }
 }
