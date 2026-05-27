@@ -5,7 +5,7 @@
 [**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.11.0** &nbsp;—&nbsp; **`components.schemas` with `$ref` dedup.** Schemas registered via `defineSchema('Name', ...)` are now promoted to `components.schemas.Name` and every occurrence in `requestBody` / `responses` / `parameters` is replaced with `{ $ref: ... **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.11.0)**
+> **What's new in v1.11.0** &nbsp;—&nbsp; **`components.schemas` with `$ref` dedup.** Schemas registered via `defineSchema('Name', …)` are now promoted to `components.schemas.Name` and every occurrence in `requestBody` / `responses` / `parameters` is replaced with a single `$ref`. **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.11.0)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder), and it generates an interactive docs UI, runnable integration flows, and Postman exports for **Express, Fastify, Hono, Koa, and NestJS** — no router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
@@ -27,12 +27,17 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 
 - An interactive docs UI at `/docs` — zero-dependency HTML, served by the same Node process
 - **OpenAPI 3.1 export** at `/docs/openapi.json` and a one-click download button — drop the file into Scalar, Redoc, Swagger UI, or any spec-driven tool
+- **`components.schemas` with `$ref` dedup** *(v1.11)* — `defineSchema` lifts shared shapes into `components.schemas`; repeated anonymous objects auto-promote too
+- **Per-route + top-level `tags`** *(v1.11)* — group operations the way you want, with descriptions and `externalDocs`
+- **Callbacks + webhooks** *(v1.11)* — OpenAPI 3.1 `callbacks` (per-operation) and `webhooks` (document-level) wired in
+- **Multi-example bodies and responses** *(v1.11)* — single value or named map, per-status examples for error responses
 - **`securitySchemes` + per-route `security`** *(v1.8)* — declare auth schemes once, attach them automatically; the spec passes Redocly's `security-defined` rule cleanly
 - **`hidden: true` per route** *(v1.8)* — keep internal endpoints serving traffic but invisible to docs / OpenAPI consumers
+- **`doctreen lint openapi` CLI** *(v1.11)* — Spectral-lite linter for the exported (or any) OpenAPI 3.x doc; CI-ready exit codes
 - Runnable integration flows with a CLI runner suitable for CI
 - Postman Collection v2.1 export
 - **Runtime validation** — opt in with `validate: true` and invalid requests are rejected with a structured 422 before they reach your handler. Same schema as the docs.
-- **Schema Drift Detection** — declared schemas are compared against real traffic on every adapter; sampled mismatches feed a UI tab, `/drift.json`, and an opinionated CLI (`npx doctreen drift report --fail-on-mismatch`) so contracts and code never drift apart silently
+- **Schema Drift Detection** — declared schemas are compared against real traffic on every adapter; sampled mismatches feed a UI tab, `/drift.json`, hourly + 7-day buckets, an opinionated CLI (`npx doctreen drift report --fail-on-mismatch`), an optional reset endpoint + `doctreen drift reset` CLI, and a Redis-backed `DriftStore` reference for multi-replica deployments
 
 ## How DocTreen compares
 
@@ -47,6 +52,8 @@ DocTreen sits next to your existing router. Pass a Zod schema to `defineRoute` (
 | OpenAPI 3.1 export       | Yes (built-in)     | Yes               | Required          | Plugin           |
 | `securitySchemes` + per-route `security` | Yes (v1.8) | Manual          | Spec input        | Manual           |
 | Hide a route from docs   | Per route + path patterns | No         | Spec edit         | No               |
+| Schema drift detection vs live traffic | Yes (v1.10, CI-ready) | No  | No                | No               |
+| OpenAPI linter (CLI)     | Yes (v1.11)        | No                | Via Spectral      | No               |
 | Setup time               | ~5 min             | ~30 min           | ~1 hour           | Refactor router  |
 
 ---
@@ -625,9 +632,18 @@ npx doctreen lint openapi --file ./build/openapi.json --fail-on warning
 
 # CI-friendly JSON
 npx doctreen lint openapi --url https://api.example.com/docs --json
+
+# Hide the noisy `info` items in the table
+npx doctreen lint openapi --url http://localhost:3000/docs --no-info
 ```
 
-Checks duplicate operationIds, missing `info.title` / `info.version`, undeclared path params, untagged operations, missing 4xx responses, undescribed tags, unused `components.schemas`. Exit code 1 when the configured `--fail-on` threshold is reached.
+Nine rules across three severities:
+
+- **error** — duplicate operationIds, missing `info.title` / `info.version`, undeclared path parameters, operations without `responses`
+- **warning** — missing operation `summary`, missing 4xx response, undescribed tags
+- **info** — untagged operations, unused `components.schemas` entries
+
+`--fail-on error` (default) → exit 1 when any error is present. `--fail-on warning` → exit 1 on errors *or* warnings. `info` never affects exit code. Use `--no-info` to suppress info-level rows from the table without changing the exit semantics.
 
 ### Configuring servers, security schemes, and per-route security (v1.8+)
 
@@ -1428,10 +1444,11 @@ Strategy: **go deep, not wide.** Logging, security, auth, and APM stay out of sc
 - [x] **`openapi.servers` + `securitySchemes` + per-route `security` + `hidden`** *(v1.8)* — declare auth schemes once, attach to operations automatically; `Authorization` header auto-stripped; routes can opt out of docs entirely.
 - [x] **`headHtml` config** *(v1.9)* — inject analytics scripts, custom CSS, favicons, or OG metadata into the docs UI `<head>` without forking.
 - [x] **Schema drift detection — production grade** *(v1.10)* — structured pipeline with per-route aggregates and hourly buckets, opt-in sampling (default 1%), `onDrift` callback + webhook dispatch, pluggable `DriftStore` interface, `Drift` tab in the UI with per-route badges, and `npx doctreen drift report --fail-on-mismatch` for CI. All five adapters (Express, Fastify, Hono, Koa, NestJS) emit through the same pipeline.
+- [x] **Drift reset endpoint, daily buckets, Redis store reference** *(v1.10.1)* — opt-in `POST <docsPath>/drift/reset` (gated by `drift.allowReset` + optional `resetToken`), companion `npx doctreen drift reset` CLI, rolling 7-day `dailyBuckets` alongside the hourly 24h buckets, and a complete Redis-backed `DriftStore` reference at `example/drift-redis-store.js`.
+- [x] **OpenAPI polish** *(v1.11)* — `$ref`-based `components.schemas` dedup (named + auto-anonymous), first-class per-route + top-level `tags`, OpenAPI 3.1 `callbacks` and `webhooks`, multi-example bodies and responses, `npx doctreen lint openapi` (live URL or local file, CI-ready exit codes).
 
 **Next up**
 
-- [x] **OpenAPI polish** *(v1.11)* — `$ref`-based `components.schemas` dedup (named + auto-anonymous), first-class per-route + top-level `tags`, OpenAPI 3.1 `callbacks` and `webhooks`, multi-example bodies and responses, `npx doctreen lint openapi` (live URL or local file, CI-ready exit codes).
 - [ ] **Mock server** *(v1.12)* — `npx doctreen mock --port 4000` serves a fake API from the registry. Faker-backed examples, latency/error injection, `--from openapi.json` for spec-driven mocking.
 - [ ] **Type & client codegen** *(v1.13)* — `npx doctreen codegen types` and `codegen client` produce typed request/response interfaces and a tRPC-style fetch wrapper. Watch mode for dev.
 - [ ] **AI-native endpoints** *(v1.14)* — `/docs/llm.txt`, `/docs/agents.json`, and `npx doctreen mcp` (Model Context Protocol server) so Claude and other agents discover your API as callable tools.

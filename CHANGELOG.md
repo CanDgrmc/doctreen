@@ -9,13 +9,13 @@ adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - **`components.schemas` with `$ref` dedup.** Schemas registered via
-  `defineSchema('Name', ...)` are now promoted to
-  `components.schemas.Name` and every occurrence in `requestBody` /
-  `responses` / `parameters` is replaced with `{ $ref: ... }`. Anonymous
-  object schemas with three or more properties that appear in two or
-  more places are also auto-promoted under stable `Schema1`, `Schema2`,
-  … names. The exported spec stays self-contained but no longer ships
-  the same shape inlined dozens of times.
+  `defineSchema('Name', …)` are now promoted to `components.schemas.Name`
+  and every occurrence in `requestBody` / `responses` / `parameters` is
+  replaced with a single `$ref`. Anonymous object schemas with three or
+  more properties that appear in two or more places are also
+  auto-promoted under stable `Schema1`, `Schema2`, … names. The exported
+  spec stays self-contained but no longer ships the same shape inlined
+  dozens of times.
 
 - **Per-route + top-level tags.** `defineRoute({ tags: ['users'] })` and
   `@DocRoute({ tags: ['users'] })` override the legacy first-path-segment
