@@ -315,7 +315,39 @@ function normalizeOpenApiConfig(input) {
     ? cfg.security
     : null;
 
-  return { servers: servers, securitySchemes: securitySchemes, security: security };
+  // Top-level tag metadata (v1.11+). Each entry: { name, description?, externalDocs? }.
+  // Used to attach descriptions to the per-operation tags so they render nicely
+  // in Scalar/Redoc/Swagger UI. Per-route `tags` still drive grouping.
+  const tags = Array.isArray(cfg.tags) && cfg.tags.length > 0
+    ? cfg.tags
+        .filter(function (t) { return t && typeof t === 'object' && typeof t.name === 'string'; })
+        .map(function (t) {
+          const out = { name: t.name };
+          if (typeof t.description === 'string') out.description = t.description;
+          if (t.externalDocs && typeof t.externalDocs === 'object') out.externalDocs = t.externalDocs;
+          return out;
+        })
+    : null;
+
+  // OpenAPI 3.1 `webhooks` (v1.11+). A user-declared map of named outgoing
+  // webhook contracts — these are NOT routes the server handles, they describe
+  // events the server may send. Shape:
+  //   { name: { method, summary?, description?, request?: { body, query }, response?, errors? } }
+  // Nested schemas can be Zod or SchemaNode; normalise the same way callbacks
+  // are normalised so the exporter consumes uniform SchemaNodes only.
+  let webhooks = null;
+  if (cfg.webhooks && typeof cfg.webhooks === 'object' && !Array.isArray(cfg.webhooks)) {
+    const { normaliseCallbacksBag } = require('./internal/schemas');
+    webhooks = normaliseCallbacksBag(cfg.webhooks);
+  }
+
+  return {
+    servers: servers,
+    securitySchemes: securitySchemes,
+    security: security,
+    tags: tags,
+    webhooks: webhooks,
+  };
 }
 
 /**
@@ -421,6 +453,22 @@ const _schemaRegistry = new Map();
 function defineSchema(name, schema) {
   _schemaRegistry.set(name, schema);
   return schema;
+}
+
+/**
+ * Internal: returns the live named-schema registry. The OpenAPI exporter
+ * uses this to map SchemaNode references back to their registered names so
+ * they can be promoted to `components.schemas` and replaced with `$ref` —
+ * this is what makes `defineSchema('User', ...)` show up as
+ * `$ref: '#/components/schemas/User'` in the exported spec.
+ *
+ * Not part of the public API. Returns the Map directly (no copy) for
+ * performance; do not mutate from the outside.
+ *
+ * @returns {Map<string, SchemaNode>}
+ */
+function _getNamedSchemas() {
+  return _schemaRegistry;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -652,6 +700,7 @@ module.exports = {
   shouldExclude,
   inferSchema,
   defineSchema,
+  _getNamedSchemas,
   parseJSDoc,
   s,
   flows: require('./flows/index'),

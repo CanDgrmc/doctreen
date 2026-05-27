@@ -5,8 +5,9 @@
  * `doctreen` — umbrella CLI for repo-level operations.
  *
  * Subcommands:
- *   drift report --url <docsUrl> [--fail-on-mismatch] [--json] [--min-issues N]
- *   drift reset  --url <docsUrl> [--token <token>] [--json]
+ *   drift report  --url <docsUrl> [--fail-on-mismatch] [--json] [--min-issues N]
+ *   drift reset   --url <docsUrl> [--token <token>] [--json]
+ *   lint openapi  (--url <docsUrl> | --file <path>) [--json] [--fail-on warning|error]
  *
  * `report` hits `<docsUrl>/drift.json` (or `<docsUrl>` if it already ends in
  * `/drift.json`) and prints a human-readable summary. With `--fail-on-mismatch`
@@ -28,8 +29,24 @@ function printRootUsage() {
   console.error('Commands:');
   console.error('  drift report   Print a schema drift report from a running server');
   console.error('  drift reset    Clear the in-memory drift store on a running server');
+  console.error('  lint openapi   Lint an OpenAPI 3.x document (live URL or local file)');
   console.error('');
   console.error('Run `' + PROGRAM + ' <command> --help` for command-specific options.');
+}
+
+function printLintOpenApiUsage() {
+  console.error('Usage: ' + PROGRAM + ' lint openapi (--url <docsUrl> | --file <path>) [options]');
+  console.error('');
+  console.error('Lints an OpenAPI 3.x document for duplicate operationIds, missing 4xx');
+  console.error('responses, undeclared path params, unused components.schemas, etc.');
+  console.error('');
+  console.error('Options:');
+  console.error('  --url <docsUrl>       Live docs URL (fetches `${docsUrl}/openapi.json`)');
+  console.error('  --file <path>         Path to a local JSON or YAML-as-JSON file');
+  console.error('  --fail-on <level>     `error` (default) or `warning` — exit code 1 when present');
+  console.error('  --json                Print raw JSON output');
+  console.error('  --no-info             Suppress `info` severity issues from the table');
+  console.error('  -h, --help            Show this help');
 }
 
 function printDriftReportUsage() {
@@ -92,6 +109,24 @@ function parseArgs(argv) {
       return { command: 'drift-reset', opts: opts };
     }
     return { command: 'drift-help', error: true };
+  }
+  if (cmd === 'lint') {
+    const sub = args.shift();
+    if (sub === 'openapi') {
+      const opts = { url: null, file: null, json: false, failOn: 'error', hideInfo: false };
+      while (args.length) {
+        const a = args.shift();
+        if (a === '--url') opts.url = args.shift();
+        else if (a === '--file') opts.file = args.shift();
+        else if (a === '--fail-on') opts.failOn = args.shift() || 'error';
+        else if (a === '--json') opts.json = true;
+        else if (a === '--no-info') opts.hideInfo = true;
+        else if (a === '-h' || a === '--help') return { command: 'lint-openapi-help' };
+        else { console.error('Unknown option: ' + a); return { command: 'lint-openapi-help', error: true }; }
+      }
+      return { command: 'lint-openapi', opts: opts };
+    }
+    return { command: 'help', error: true };
   }
   return { command: 'help', error: true };
 }
@@ -238,6 +273,80 @@ async function runDriftReset(opts) {
   if (!res.ok || !body || !body.ok) process.exit(1);
 }
 
+async function runLintOpenApi(opts) {
+  const path = require('path');
+  const fs = require('fs');
+
+  if (!opts.url && !opts.file) {
+    printLintOpenApiUsage();
+    process.exit(2);
+  }
+
+  let doc;
+  if (opts.file) {
+    try {
+      const raw = fs.readFileSync(path.resolve(opts.file), 'utf8');
+      doc = JSON.parse(raw);
+    } catch (err) {
+      console.error('Error reading file: ' + err.message);
+      process.exit(2);
+    }
+  } else {
+    if (typeof fetch !== 'function') {
+      console.error('Error: global fetch() is not available. doctreen CLI requires Node 18+.');
+      process.exit(2);
+    }
+    const url = opts.url.endsWith('/openapi.json')
+      ? opts.url
+      : opts.url.replace(/\/+$/, '') + '/openapi.json';
+    try {
+      const res = await fetch(url, { headers: { accept: 'application/json' } });
+      if (!res.ok) {
+        console.error('Fetch failed: ' + res.status + ' ' + res.statusText);
+        process.exit(2);
+      }
+      doc = await res.json();
+    } catch (err) {
+      console.error('Error: ' + err.message);
+      process.exit(2);
+    }
+  }
+
+  // Lazy-require so the CLI script keeps working even if the package is
+  // installed without dev deps.
+  const { lintOpenApiDocument } = require('../src/internal/openapi-lint');
+  const result = lintOpenApiDocument(doc);
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  } else {
+    const filtered = opts.hideInfo
+      ? result.issues.filter(function (i) { return i.severity !== 'info'; })
+      : result.issues;
+    if (filtered.length === 0) {
+      process.stdout.write('OK: no lint issues found.\n');
+    } else {
+      const symbol = { error: 'E', warning: 'W', info: 'i' };
+      for (const i of filtered) {
+        process.stdout.write(
+          '[' + symbol[i.severity] + '] ' +
+          (i.path ? i.path + '  ' : '') +
+          i.code + ': ' + i.message + '\n'
+        );
+      }
+      process.stdout.write('\n');
+      process.stdout.write(
+        result.counts.error + ' error, ' +
+        result.counts.warning + ' warning, ' +
+        result.counts.info + ' info\n'
+      );
+    }
+  }
+
+  const threshold = opts.failOn === 'warning' ? (result.counts.error + result.counts.warning) : result.counts.error;
+  if (threshold > 0) process.exit(1);
+}
+
 async function main() {
   const parsed = parseArgs(process.argv);
   switch (parsed.command) {
@@ -247,6 +356,8 @@ async function main() {
     case 'drift-reset-help': printDriftResetUsage(); process.exit(parsed.error ? 2 : 0); break;
     case 'drift-report': await runDriftReport(parsed.opts); break;
     case 'drift-reset': await runDriftReset(parsed.opts); break;
+    case 'lint-openapi-help': printLintOpenApiUsage(); process.exit(parsed.error ? 2 : 0); break;
+    case 'lint-openapi': await runLintOpenApi(parsed.opts); break;
     default: printRootUsage(); process.exit(2);
   }
 }

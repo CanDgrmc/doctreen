@@ -88,6 +88,46 @@ export interface RouteEntry {
   hidden?: boolean;
   /** Per-route OpenAPI `security` requirement (v1.8+). Empty array marks the route explicitly public. */
   security?: Array<Record<string, string[]>>;
+  /** Per-route OpenAPI tags (v1.11+). Overrides the default path-segment tag. */
+  tags?: string[];
+  /** Per-operation OpenAPI 3.1 callbacks (v1.11+). */
+  callbacks?: Record<string, CallbackDef>;
+  /** Per-route OpenAPI examples (v1.11+) — attached to request body + responses. */
+  examples?: RouteExamples;
+}
+
+/**
+ * A single callback / webhook contract (v1.11+). Same shape used for
+ * per-operation `callbacks` and document-level `webhooks` (which omits `url`).
+ */
+export interface CallbackDef {
+  /** Path-item key used by OpenAPI; e.g. `'{$request.body#/callbackUrl}'`. Required for callbacks, ignored for webhooks. */
+  url?: string;
+  method: string;
+  summary?: string;
+  description?: string;
+  request?: { body?: SchemaNode | unknown; query?: SchemaNode | unknown };
+  response?: SchemaNode | unknown;
+  errors?: Record<number, string | { description?: string; schema?: SchemaNode | unknown }>;
+  examples?: RouteExamples;
+}
+
+/**
+ * Multi-example bag attached to a route (v1.11+). Either a single value
+ * (rendered as `example`) or a `{ name: { value, summary?, description? } }`
+ * map (rendered as `examples`).
+ */
+export interface RouteExamples {
+  /** Examples for the request body. */
+  request?: unknown | Record<string, { value: unknown; summary?: string; description?: string }>;
+  /** Alias for `request`. */
+  body?: unknown | Record<string, { value: unknown; summary?: string; description?: string }>;
+  /** Examples for the success response. */
+  response?: unknown | Record<string, { value: unknown; summary?: string; description?: string }>;
+  /** Alias for `response`. */
+  success?: unknown | Record<string, { value: unknown; summary?: string; description?: string }>;
+  /** Examples keyed by HTTP status code, attached to the corresponding error response. */
+  responses?: Record<string, unknown | Record<string, { value: unknown; summary?: string; description?: string }>>;
 }
 
 /**
@@ -304,6 +344,36 @@ export interface OpenApiConfig {
    * @example [{ bearerAuth: [] }]
    */
   security?: Array<Record<string, string[]>>;
+
+  /**
+   * Top-level `tags[]` metadata emitted into the OpenAPI document (v1.11+).
+   * Each entry attaches a description (and optional `externalDocs`) to a tag
+   * referenced by per-route `tags`. Tags used by routes but not declared
+   * here are appended without metadata.
+   *
+   * @example
+   * tags: [
+   *   { name: 'users', description: 'User account management' },
+   *   { name: 'admin', description: 'Operator-only endpoints' },
+   * ]
+   */
+  tags?: Array<{ name: string; description?: string; externalDocs?: { description?: string; url: string } }>;
+
+  /**
+   * Document-level `webhooks` map (OpenAPI 3.1, v1.11+). Use this to describe
+   * outgoing event contracts your server emits — webhooks are NOT routes the
+   * server handles. Shape mirrors the per-operation `callbacks` block.
+   *
+   * @example
+   * webhooks: {
+   *   userCreated: {
+   *     method: 'POST',
+   *     summary: 'Fired when a user signs up',
+   *     request: { body: UserSchema },
+   *   },
+   * }
+   */
+  webhooks?: Record<string, CallbackDef>;
 }
 
 /**
@@ -323,6 +393,8 @@ export interface NormalizedConfig {
     servers: OpenApiServer[];
     securitySchemes: Record<string, unknown> | null;
     security: Array<Record<string, string[]>> | null;
+    tags: Array<{ name: string; description?: string; externalDocs?: { description?: string; url: string } }> | null;
+    webhooks: Record<string, CallbackDef> | null;
   };
   headHtml: string | null;
   drift: {

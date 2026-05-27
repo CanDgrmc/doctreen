@@ -125,6 +125,9 @@ function seedEntryFromHandler(entry, handler, nativeSchema) {
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
     if (predef.hidden === true)                                          entry.hidden            = true;
     if (predef.security !== undefined)                                   entry.security          = predef.security;
+    if (Array.isArray(predef.tags) && predef.tags.length > 0)            entry.tags              = predef.tags.slice();
+    if (predef.callbacks && typeof predef.callbacks === 'object')        entry.callbacks         = predef.callbacks;
+    if (predef.examples && typeof predef.examples === 'object')          entry.examples          = predef.examples;
   }
 
   // 2. Fastify native JSON Schema

@@ -230,6 +230,15 @@ function wrapRouteHandlers(handlerStack, entry, config) {
       if (predef.security !== undefined) {
         entry.security = predef.security;
       }
+      if (Array.isArray(predef.tags) && predef.tags.length > 0) {
+        entry.tags = predef.tags.slice();
+      }
+      if (predef.callbacks && typeof predef.callbacks === 'object') {
+        entry.callbacks = predef.callbacks;
+      }
+      if (predef.examples && typeof predef.examples === 'object') {
+        entry.examples = predef.examples;
+      }
     }
 
     // Fallback: parse JSDoc block comment from the handler source.

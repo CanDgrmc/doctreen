@@ -116,6 +116,19 @@ function seedEntryFromSchema(entry, docSchema) {
   if (docSchema.security !== undefined) {
     entry.security = docSchema.security;
   }
+
+  if (Array.isArray(docSchema.tags) && docSchema.tags.length > 0) {
+    entry.tags = docSchema.tags.slice();
+  }
+
+  if (docSchema.callbacks && typeof docSchema.callbacks === 'object') {
+    const { normaliseCallbacksBag } = require('../internal/schemas');
+    entry.callbacks = normaliseCallbacksBag(docSchema.callbacks);
+  }
+
+  if (docSchema.examples && typeof docSchema.examples === 'object') {
+    entry.examples = docSchema.examples;
+  }
 }
 
 // ─── Route discovery ──────────────────────────────────────────────────────────
