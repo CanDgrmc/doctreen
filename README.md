@@ -2,7 +2,7 @@
 
 **One Zod schema per route. Get docs, integration tests, *and* runtime validation. No OpenAPI YAML.**
 
-[**Try the live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](#roadmap) &nbsp;·&nbsp; License: MIT
+[**Docs →**](https://doctreen.dev) &nbsp;·&nbsp; [**Live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](https://doctreen.dev/docs/roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
 > **What's new in v1.12.0** &nbsp;—&nbsp; **`npx doctreen mock` — spec-driven mock server.** Spin up an Express-backed fake of any OpenAPI 3.x document in seconds: **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.12.0)**
