@@ -5,7 +5,7 @@
 [**Docs →**](https://doctreen.dev) &nbsp;·&nbsp; [**Live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](https://doctreen.dev/docs/roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.12.1** &nbsp;—&nbsp; **`npx doctreen mock` — spec-driven mock server.** Spin up an Express-backed fake of any OpenAPI 3.x document in seconds: **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.12.1)**
+> **What's new in v1.12.2** &nbsp;—&nbsp; **`npx doctreen mock` — spec-driven mock server.** Spin up an Express-backed fake of any OpenAPI 3.x document in seconds: **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.12.2)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder) and you get an interactive docs UI, OpenAPI 3.1 export, runnable integration flows, and 422-on-invalid-request validation — for **Express, Fastify, Hono, Koa, and NestJS**. No router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
