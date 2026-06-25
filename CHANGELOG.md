@@ -4,6 +4,43 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] — 2026-06-25
+
+### Added
+
+- **`npx doctreen codegen` — typed clients from your OpenAPI doc.** Generate
+  a strict TypeScript declaration file and a fully-typed fetch client from
+  the same `/docs/openapi.json` that DocTreen already emits:
+
+  ```bash
+  npx doctreen codegen types  --from http://localhost:3000/docs --out src/api/types.d.ts
+  npx doctreen codegen client --from http://localhost:3000/docs --out src/api/client.ts \
+                              --base-url https://api.example.com
+  ```
+
+  The `types` output mirrors `components.schemas` 1:1 as `export interface`
+  declarations and emits per-operation `…Params` / `…Query` / `…Body` /
+  `…Response` shapes. The `client` output is a single self-contained file
+  exporting `createClient({ baseUrl, fetch?, headers?, onRequest? })` with
+  one async method per operation, e.g. `await api.getUsersById({ params: { id: '1' } })`
+  — every argument and return value typed end-to-end. Errors come back as
+  `DoctreenHttpError` carrying `status` and the parsed body.
+
+- **`--watch [ms]` flag.** Re-generate on change. Polls URL sources every
+  `<ms>` (default 2000ms); uses `fs.watch()` for file sources. Skips the
+  write when the output is byte-identical so editor file-watchers stay
+  quiet.
+
+- **Programmatic `doctreen/codegen` entry point.** `generateTypes(doc, opts?)`,
+  `generateClient(doc, opts?)`, and `loadOpenApiDoc(from)` exported for
+  build scripts that want to inline codegen.
+
+### How it fits
+
+Works with any OpenAPI 3.x document — not just DocTreen-emitted ones. The
+generated client has zero dependencies (uses global `fetch`) and is safe
+to check in alongside the rest of your source.
+
 ## [1.12.0] — 2026-05-27
 
 ### Added

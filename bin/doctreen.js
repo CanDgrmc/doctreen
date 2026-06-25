@@ -10,6 +10,9 @@
  *   lint openapi  (--url <docsUrl> | --file <path>) [--json] [--fail-on warning|error]
  *   mock          --from <url|file> [--port N] [--latency ms[-ms]] [--error-rate p]
  *                 [--no-crud] [--no-faker] [--seed N] [--persist <file>] [--quiet]
+ *   codegen types   --from <url|file> --out <path> [--watch [ms]]
+ *   codegen client  --from <url|file> --out <path> [--base-url <url>]
+ *                                                  [--types-import <path>] [--watch [ms]]
  *
  * `report` hits `<docsUrl>/drift.json` (or `<docsUrl>` if it already ends in
  * `/drift.json`) and prints a human-readable summary. With `--fail-on-mismatch`
@@ -33,6 +36,8 @@ function printRootUsage() {
   console.error('  drift reset    Clear the in-memory drift store on a running server');
   console.error('  lint openapi   Lint an OpenAPI 3.x document (live URL or local file)');
   console.error('  mock           Serve a fake API from an OpenAPI document (faker-backed)');
+  console.error('  codegen types  Generate TypeScript type declarations from an OpenAPI doc');
+  console.error('  codegen client Generate a typed fetch client from an OpenAPI doc');
   console.error('');
   console.error('Run `' + PROGRAM + ' <command> --help` for command-specific options.');
 }
@@ -104,6 +109,25 @@ function printDriftResetUsage() {
   console.error('  -h, --help            Show this help');
 }
 
+function printCodegenUsage() {
+  console.error('Usage: ' + PROGRAM + ' codegen <types|client> --from <url|file> --out <path> [options]');
+  console.error('');
+  console.error('Reads an OpenAPI 3.x document and emits TypeScript:');
+  console.error('  types   → a `.d.ts` file with one interface per `components.schemas` entry');
+  console.error('            plus per-operation Params/Query/Body/Response shapes.');
+  console.error('  client  → a `.ts` file exporting `createClient({ baseUrl, fetch?, headers? })`');
+  console.error('            with one fully-typed async method per operation.');
+  console.error('');
+  console.error('Options:');
+  console.error('  --from <src>           URL (auto-appends /openapi.json) or local JSON file (required)');
+  console.error('  --out <path>           Output file path (required)');
+  console.error('  --base-url <url>       Default baseUrl baked into the generated client (client only)');
+  console.error('  --types-import <path>  Module path the client imports types from (default `./types`)');
+  console.error('  --watch [ms]           Re-generate on change. For URL sources polls every <ms>');
+  console.error('                          (default 2000); for files watches via fs.watch.');
+  console.error('  -h, --help             Show this help');
+}
+
 function parseArgs(argv) {
   const args = argv.slice(2);
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
@@ -163,6 +187,34 @@ function parseArgs(argv) {
       else { console.error('Unknown option: ' + a); return { command: 'mock-help', error: true }; }
     }
     return { command: 'mock', opts: opts };
+  }
+  if (cmd === 'codegen') {
+    const sub = args.shift();
+    if (sub !== 'types' && sub !== 'client') return { command: 'codegen-help', error: true };
+    const opts = {
+      kind: sub,
+      from: null,
+      out: null,
+      baseUrl: '',
+      typesImport: './types',
+      watch: false,
+      watchMs: 2000,
+    };
+    while (args.length) {
+      const a = args.shift();
+      if (a === '--from') opts.from = args.shift();
+      else if (a === '--out') opts.out = args.shift();
+      else if (a === '--base-url') opts.baseUrl = args.shift() || '';
+      else if (a === '--types-import') opts.typesImport = args.shift() || './types';
+      else if (a === '--watch') {
+        opts.watch = true;
+        const next = args[0];
+        if (next && /^\d+$/.test(next)) { opts.watchMs = parseInt(args.shift(), 10); }
+      }
+      else if (a === '-h' || a === '--help') return { command: 'codegen-help' };
+      else { console.error('Unknown option: ' + a); return { command: 'codegen-help', error: true }; }
+    }
+    return { command: 'codegen', opts: opts };
   }
   if (cmd === 'lint') {
     const sub = args.shift();
@@ -380,6 +432,67 @@ async function runDriftReset(opts) {
   if (!res.ok || !body || !body.ok) process.exit(1);
 }
 
+async function runCodegen(opts) {
+  if (!opts.from || !opts.out) {
+    printCodegenUsage();
+    process.exit(2);
+  }
+
+  const fs = require('fs');
+  const path = require('path');
+  const codegen = require('../src/codegen');
+
+  async function generateOnce() {
+    const doc = await codegen.loadOpenApiDoc(opts.from);
+    const output = opts.kind === 'types'
+      ? codegen.generateTypes(doc)
+      : codegen.generateClient(doc, { baseUrl: opts.baseUrl, typesImportPath: opts.typesImport });
+    const outPath = path.resolve(opts.out);
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, output, 'utf8');
+    return { path: outPath, bytes: Buffer.byteLength(output, 'utf8') };
+  }
+
+  try {
+    const res = await generateOnce();
+    process.stdout.write('[doctreen codegen] wrote ' + res.path + ' (' + res.bytes + ' bytes)\n');
+  } catch (err) {
+    console.error('Error: ' + err.message);
+    process.exit(2);
+  }
+
+  if (!opts.watch) return;
+
+  const isUrl = /^https?:\/\//i.test(opts.from);
+  let lastOutput = null;
+  try { lastOutput = require('fs').readFileSync(require('path').resolve(opts.out), 'utf8'); } catch (e) {}
+
+  async function regen(reason) {
+    try {
+      const doc = await codegen.loadOpenApiDoc(opts.from);
+      const output = opts.kind === 'types'
+        ? codegen.generateTypes(doc)
+        : codegen.generateClient(doc, { baseUrl: opts.baseUrl, typesImportPath: opts.typesImport });
+      if (output === lastOutput) return;
+      lastOutput = output;
+      const outPath = require('path').resolve(opts.out);
+      require('fs').writeFileSync(outPath, output, 'utf8');
+      process.stdout.write('[doctreen codegen] regenerated (' + reason + ', ' + Buffer.byteLength(output, 'utf8') + ' bytes)\n');
+    } catch (err) {
+      process.stderr.write('[doctreen codegen] watch error: ' + err.message + '\n');
+    }
+  }
+
+  if (isUrl) {
+    process.stdout.write('[doctreen codegen] watching ' + opts.from + ' every ' + opts.watchMs + 'ms\n');
+    setInterval(function () { regen('poll'); }, Math.max(250, opts.watchMs));
+  } else {
+    const watchPath = require('path').resolve(opts.from);
+    process.stdout.write('[doctreen codegen] watching ' + watchPath + '\n');
+    require('fs').watch(watchPath, function () { regen('fs.watch'); });
+  }
+}
+
 async function runLintOpenApi(opts) {
   const path = require('path');
   const fs = require('fs');
@@ -467,6 +580,8 @@ async function main() {
     case 'lint-openapi': await runLintOpenApi(parsed.opts); break;
     case 'mock-help': printMockUsage(); process.exit(parsed.error ? 2 : 0); break;
     case 'mock': await runMock(parsed.opts); break;
+    case 'codegen-help': printCodegenUsage(); process.exit(parsed.error ? 2 : 0); break;
+    case 'codegen': await runCodegen(parsed.opts); break;
     default: printRootUsage(); process.exit(2);
   }
 }
