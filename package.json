@@ -1,6 +1,6 @@
 {
   "name": "doctreen",
-  "version": "1.12.2",
+  "version": "1.13.0",
   "description": "Code-first API docs + OpenAPI 3.1 export + integration tests + runtime validation for Node.js. Define routes once with Zod and get docs, runnable flows, 422-on-invalid-request validation, OpenAPI 3.1 export, and schema drift detection for Express, Fastify, Hono, Koa, and NestJS.",
   "main": "src/index.js",
   "types": "src/index.d.ts",
@@ -44,6 +44,10 @@
     "./mock": {
       "types": "./src/mock/index.d.ts",
       "default": "./src/mock/index.js"
+    },
+    "./codegen": {
+      "types": "./src/codegen/index.d.ts",
+      "default": "./src/codegen/index.js"
     },
     "./example": {
       "types": "./src/internal/example.d.ts",
@@ -94,7 +98,12 @@
     "schema-drift",
     "mock-server",
     "api-mock",
-    "faker"
+    "faker",
+    "codegen",
+    "openapi-codegen",
+    "typescript-codegen",
+    "fetch-client",
+    "typed-fetch"
   ],
   "license": "MIT",
   "repository": {
