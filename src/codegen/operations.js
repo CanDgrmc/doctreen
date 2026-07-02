@@ -81,6 +81,44 @@ function collectParameters(pathItem, op) {
   };
 }
 
+function methodPascal(method) {
+  const m = String(method).toLowerCase();
+  return m.charAt(0).toUpperCase() + m.slice(1);
+}
+
+/**
+ * Guarantee that every descriptor has a unique `baseName` (drives the emitted
+ * type names) and `fnName` (drives the client method keys). Two operations can
+ * legitimately collide: the same `operationId` reused across methods, an
+ * `operationId` that doesn't encode the HTTP verb, or two paths that sanitise
+ * to the same identifier. Left unresolved this silently drops operations —
+ * duplicate object keys in the client mean the last method on a path wins.
+ *
+ * Disambiguation strategy (deterministic, order-stable so the types file and
+ * the client file always agree):
+ *   1. If a name is shared by >1 operation, append the Pascal-cased method
+ *      (`users` → `usersPost`, `User` → `UserPost`).
+ *   2. If that still collides, append an incrementing counter.
+ *
+ * @param {Array<object>} descriptors
+ * @param {string} field
+ */
+function uniquifyField(descriptors, field) {
+  const counts = new Map();
+  for (const d of descriptors) counts.set(d[field], (counts.get(d[field]) || 0) + 1);
+
+  const used = new Set();
+  for (const d of descriptors) {
+    let name = d[field];
+    if (counts.get(name) > 1) name = name + methodPascal(d.method);
+    let candidate = name;
+    let i = 2;
+    while (used.has(candidate)) candidate = name + (i++);
+    used.add(candidate);
+    d[field] = candidate;
+  }
+}
+
 function operationDescriptors(doc) {
   const paths = doc.paths || {};
   const out = [];
@@ -110,6 +148,9 @@ function operationDescriptors(doc) {
       });
     }
   }
+  // Resolve name collisions so no operation is silently dropped.
+  uniquifyField(out, 'baseName');
+  uniquifyField(out, 'fnName');
   return out;
 }
 

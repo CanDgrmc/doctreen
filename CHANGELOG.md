@@ -4,6 +4,26 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.1] — 2026-07-02
+
+### Fixed
+
+- **`codegen` now emits every HTTP method on a shared path**. Operations that
+  reused an `operationId` across HTTP verbs — or used a verb-agnostic
+  `operationId` — collapsed to a single generated name, so the typed client
+  silently kept only the last method on a path (e.g. `POST /users` clobbered
+  `GET /users`).
+  Generated type and function names are now guaranteed unique; colliding names
+  are disambiguated by HTTP method (`usersGet` / `usersPost`).
+
+- **`codegen` enum / nullable output is now correct.** A `null` present both in
+  a 3.1 `type: ["string", "null"]` array (or via `nullable: true`) and in an
+  `enum` produced a doubled union such as `"active" | "inactive" | null | null`.
+  Nullability is now folded into a single trailing `| null` and enum members are
+  deduplicated. Type coverage was extended along the way to `const` literals,
+  `prefixItems` tuples, and closed objects (`additionalProperties: false` →
+  `Record<string, never>`).
+
 ## [1.13.0] — 2026-06-25
 
 ### Added

@@ -52,6 +52,34 @@ function literalValue(v) {
   return 'unknown';
 }
 
+/** Map an enum's values to a deduplicated literal union. */
+function enumToUnion(values) {
+  const seen = new Set();
+  const parts = [];
+  for (const v of values) {
+    const lit = literalValue(v);
+    if (!seen.has(lit)) {
+      seen.add(lit);
+      parts.push(lit);
+    }
+  }
+  return parts.join(' | ');
+}
+
+/**
+ * Return a shallow copy of `schema` with any `null` stripped from its `enum`.
+ * Nullability is re-applied once by the caller, so keeping `null` in the enum
+ * here would double it.
+ */
+function withoutEnumNull(schema) {
+  if (!Array.isArray(schema.enum)) return schema;
+  const filtered = schema.enum.filter(function (v) { return v !== null; });
+  const copy = Object.assign({}, schema);
+  if (filtered.length > 0) copy.enum = filtered;
+  else delete copy.enum;
+  return copy;
+}
+
 function createContext(components) {
   return {
     components: components || {},
@@ -80,29 +108,43 @@ function schemaToTs(schema, ctx, depth) {
     return 'unknown';
   }
 
+  // Nullability can be expressed three (overlapping) ways: a `null` member in a
+  // 3.1 `type` array, the 3.0 `nullable: true` flag, or a `null` entry in the
+  // `enum`. We fold all of them into a SINGLE trailing `| null` so we never
+  // emit `... | null | null`.
+  const enumHasNull = Array.isArray(schema.enum) && schema.enum.indexOf(null) !== -1;
+
   // OpenAPI 3.1 nullable: type can be an array like ['string', 'null']
   if (Array.isArray(schema.type)) {
     const types = schema.type;
-    const hasNull = types.indexOf('null') !== -1;
+    const hasNull = types.indexOf('null') !== -1 || enumHasNull;
     const rest = types.filter(function (t) { return t !== 'null'; });
+    const base = withoutEnumNull(schema);
+    if (rest.length === 0) return 'null';
     if (rest.length === 1) {
-      const inner = schemaToTs(Object.assign({}, schema, { type: rest[0] }), ctx, depth);
+      const inner = schemaToTs(Object.assign({}, base, { type: rest[0] }), ctx, depth);
       return hasNull ? inner + ' | null' : inner;
     }
-    const parts = rest.map(function (t) { return schemaToTs(Object.assign({}, schema, { type: t }), ctx, depth); });
+    const parts = rest.map(function (t) { return schemaToTs(Object.assign({}, base, { type: t }), ctx, depth); });
     if (hasNull) parts.push('null');
     return parts.map(function (p) { return '(' + p + ')'; }).join(' | ');
   }
 
   // OpenAPI 3.0 nullable
   if (schema.nullable === true) {
-    const inner = schemaToTs(Object.assign({}, schema, { nullable: false }), ctx, depth);
+    const inner = schemaToTs(Object.assign({}, withoutEnumNull(schema), { nullable: false }), ctx, depth);
     return inner + ' | null';
   }
 
-  // enum → literal union (only when values look representable)
+  // const → single literal (OpenAPI 3.1)
+  if (Object.prototype.hasOwnProperty.call(schema, 'const')) {
+    const lit = literalValue(schema.const);
+    return enumHasNull && lit !== 'null' ? lit + ' | null' : lit;
+  }
+
+  // enum → literal union (deduplicated; `null` folded in as a single member)
   if (Array.isArray(schema.enum) && schema.enum.length > 0) {
-    return schema.enum.map(literalValue).join(' | ');
+    return enumToUnion(schema.enum);
   }
 
   if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
@@ -121,6 +163,15 @@ function schemaToTs(schema, ctx, depth) {
   if (type === 'integer' || type === 'number') return 'number';
   if (type === 'boolean') return 'boolean';
   if (type === 'null') return 'null';
+
+  // Tuple: OpenAPI 3.1 `prefixItems` (may appear with or without type: 'array').
+  if (Array.isArray(schema.prefixItems) && schema.prefixItems.length > 0) {
+    const members = schema.prefixItems.map(function (s) { return schemaToTs(s, ctx, depth); });
+    if (schema.items && typeof schema.items === 'object') {
+      members.push('...' + schemaToTs(schema.items, ctx, depth) + '[]');
+    }
+    return '[' + members.join(', ') + ']';
+  }
 
   if (type === 'array') {
     const items = schemaToTs(schema.items || {}, ctx, depth);
@@ -143,7 +194,8 @@ function objectToTs(schema, ctx, depth) {
   const ap = schema.additionalProperties;
 
   if (keys.length === 0) {
-    if (ap === true || ap === undefined && schema.type === 'object') return 'Record<string, unknown>';
+    // Explicit `additionalProperties: false` with no props → a closed, empty object.
+    if (ap === false) return 'Record<string, never>';
     if (ap && typeof ap === 'object') return 'Record<string, ' + schemaToTs(ap, ctx, depth) + '>';
     return 'Record<string, unknown>';
   }
