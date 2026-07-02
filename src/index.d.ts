@@ -17,6 +17,26 @@ export interface SchemaNode {
    * JSDoc tag wraps the name in brackets: `[body.name]` or `[propName]`.
    */
   optional?: boolean;
+  /**
+   * When true the value may also be `null`. Emitted as OpenAPI 3.1
+   * `type: [<type>, 'null']`. Set via `s.nullable(schema)`.
+   */
+  nullable?: boolean;
+  /**
+   * A fixed set of allowed values. Emitted as OpenAPI `enum`; the first value
+   * is used when generating request/response examples. Set via `s.enum([...])`.
+   */
+  enum?: Array<string | number | boolean | null>;
+  /**
+   * A single fixed value (OpenAPI `const`). Set via `s.literal(value)`.
+   */
+  const?: string | number | boolean | null;
+  /**
+   * Default value applied when the field is omitted. Used when generating
+   * request examples, cURL/Postman exports, and mock responses. Set via
+   * `s.default(schema, value)`.
+   */
+  default?: unknown;
 }
 
 /**
@@ -485,6 +505,14 @@ export declare const s: {
   array(items: SchemaNode): SchemaNode;
   /** Marks a schema node as optional. Shown as `field?` in the documentation UI. */
   optional(schema: SchemaNode): SchemaNode;
+  /** A fixed set of allowed values. Value type is inferred from the first entry. */
+  enum(values: Array<string | number | boolean | null>): SchemaNode;
+  /** A single fixed value (OpenAPI `const`). Type inferred from the value. */
+  literal(value: string | number | boolean | null): SchemaNode;
+  /** Marks a schema node as nullable (`type: [<type>, 'null']` in OpenAPI 3.1). */
+  nullable(schema: SchemaNode): SchemaNode;
+  /** Attaches a default value; the field becomes optional and the default seeds examples. */
+  default(schema: SchemaNode, value: unknown): SchemaNode;
 };
 
 /**

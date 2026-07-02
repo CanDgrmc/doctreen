@@ -64,10 +64,21 @@ function zodToSchemaNode(zodSchema, depth) {
     return { ...zodToSchemaNode(def.innerType, depth + 1), optional: true };
   }
   if (t === 'ZodNullable') {
-    return { ...zodToSchemaNode(def.innerType, depth + 1), optional: true };
+    return { ...zodToSchemaNode(def.innerType, depth + 1), nullable: true };
   }
   if (t === 'ZodDefault') {
-    return zodToSchemaNode(def.innerType, depth + 1);
+    const inner = zodToSchemaNode(def.innerType, depth + 1);
+    // `def.defaultValue` is a thunk in Zod v3. A field with a default is
+    // optional on input, so mark it as such alongside the resolved value.
+    let value;
+    try {
+      value = typeof def.defaultValue === 'function' ? def.defaultValue() : def.defaultValue;
+    } catch (_) {
+      value = undefined;
+    }
+    return value === undefined
+      ? { ...inner, optional: true }
+      : { ...inner, default: value, optional: true };
   }
   if (t === 'ZodCatch') {
     return zodToSchemaNode(def.innerType, depth + 1);
@@ -89,17 +100,29 @@ function zodToSchemaNode(zodSchema, depth) {
 
   // ── enum / literal ─────────────────────────────────────────────────────────
   if (t === 'ZodEnum') {
-    // All enum values are strings in ZodEnum
-    return { type: 'string' };
+    // All enum values are strings in ZodEnum. `def.values` is the string[].
+    const values = Array.isArray(def.values) ? def.values.slice() : [];
+    return values.length > 0 ? { type: 'string', enum: values } : { type: 'string' };
   }
   if (t === 'ZodNativeEnum') {
-    const vals = Object.values(def.values || {});
-    const hasString = vals.some((v) => typeof v === 'string');
-    return { type: hasString ? 'string' : 'number' };
+    // Native (TS) enums include reverse-mapping numeric keys; keep only the
+    // actual member values and drop the numeric-string reverse-map entries.
+    const raw = def.values || {};
+    const numeric = Object.values(raw).filter((v) => typeof v === 'number');
+    const values = numeric.length > 0
+      ? numeric
+      : Object.values(raw).filter((v) => typeof v === 'string' || typeof v === 'number');
+    const hasString = values.some((v) => typeof v === 'string');
+    return values.length > 0
+      ? { type: hasString ? 'string' : 'number', enum: values }
+      : { type: hasString ? 'string' : 'number' };
   }
   if (t === 'ZodLiteral') {
     const vt = typeof def.value;
-    return { type: vt === 'string' || vt === 'number' || vt === 'boolean' ? vt : 'string' };
+    const type = def.value === null ? 'null'
+      : vt === 'number' || vt === 'boolean' ? vt
+      : 'string';
+    return { type, const: def.value };
   }
 
   // ── union / discriminated union — use first option as representative ────────

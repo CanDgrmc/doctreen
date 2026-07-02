@@ -4,6 +4,45 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] — 2026-07-02
+
+### Added
+
+- **`s.enum`, `s.nullable`, `s.default`, and `s.literal` schema builders**. The
+  `s` helper can now express value-level facets that previously had nowhere to
+  live in a `SchemaNode`:
+
+  ```js
+  defineRoute(handler, {
+    request: {
+      body: s.object({
+        role:   s.enum(['admin', 'user', 'guest']),
+        status: s.nullable(s.enum(['active', 'inactive'])),
+        limit:  s.default(s.number(), 20),
+        kind:   s.literal('user'),
+      }),
+    },
+  });
+  ```
+
+  These flow through to the exported OpenAPI document, the docs UI schema tree,
+  and every request example (Copy as cURL, Postman export, mock server).
+
+### Fixed
+
+- **`defineRoute` now emits `enum` and `nullable`.** `SchemaNode` could only
+  carry `type` / `properties` / `items` / `optional`, so enum members and
+  nullability were dropped before reaching the OpenAPI export or docs UI —
+  `z.enum([...])` collapsed to a bare `string` and `.nullable()` was demoted to
+  `optional`. Both the `s` builder and the Zod converter now preserve them, and
+  the exporter emits `enum` plus OpenAPI 3.1 `type: [<type>, 'null']`.
+
+- **Default values are now applied in request examples.** A schema `default`
+  (via `s.default(...)` or Zod `.default(...)`) is emitted to OpenAPI and seeds
+  the generated request bodies and query parameters used by Copy as cURL, the
+  Postman export, and the mock server. Fields with a default are treated as
+  optional and excluded from `required`.
+
 ## [1.13.1] — 2026-07-02
 
 ### Fixed

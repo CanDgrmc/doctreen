@@ -64,7 +64,36 @@ function highlightPath(routePath) {
 function renderSchemaNode(node, depth) {
   if (depth === undefined) depth = 0;
   if (!node) return '<span class="t-null">—</span>';
+  return renderSchemaType(node, depth) + renderSchemaFacets(node);
+}
 
+/**
+ * Renders the value-level facets (`nullable`, `enum`, `const`, `default`) that
+ * hang off a SchemaNode as small annotations after its type.
+ *
+ * @param {SchemaNode} node
+ * @returns {string}
+ */
+function renderSchemaFacets(node) {
+  let out = '';
+  if (node.nullable === true) {
+    out += `<span class="schema-facet t-null">| null</span>`;
+  }
+  if (Array.isArray(node.enum) && node.enum.length > 0) {
+    const vals = node.enum.map((v) => escapeHtml(JSON.stringify(v))).join(' | ');
+    out += `<span class="schema-facet schema-enum">enum: ${vals}</span>`;
+  }
+  if (node.const !== undefined) {
+    out += `<span class="schema-facet schema-const">= ${escapeHtml(JSON.stringify(node.const))}</span>`;
+  }
+  if (node.default !== undefined) {
+    out += `<span class="schema-facet schema-default">default: ${escapeHtml(JSON.stringify(node.default))}</span>`;
+  }
+  return out;
+}
+
+function renderSchemaType(node, depth) {
+  if (depth === undefined) depth = 0;
   switch (node.type) {
     case 'object': {
       const entries = node.properties ? Object.entries(node.properties) : [];
@@ -1949,6 +1978,19 @@ function serveDocsUI(routes, config, options) {
     .t-unknown   { color: var(--text-dim); }
     .t-ellipsis  { color: var(--text-dim); }
     .schema-none { color: #2d3748; font-style: italic; }
+    /* Value-level facet annotations (enum / const / default / nullable) */
+    .schema-facet {
+      display: inline-block;
+      margin-left: 6px;
+      font-size: 0.66rem;
+      font-family: var(--mono, monospace);
+      color: var(--text-dim);
+      vertical-align: middle;
+    }
+    .schema-enum    { color: #b794f4; }
+    .schema-const   { color: #63b3ed; }
+    .schema-default { color: #68d391; }
+    .schema-facet.t-null { border: 0; background: none; padding: 0; }
 
     /* ── Header list ─────────────────────────────────────────────────────────── */
     .header-list {
@@ -2661,6 +2703,14 @@ function serveDocsUI(routes, config, options) {
 
   function schemaToExample(node) {
     if (!node) return null;
+    // Value-level facets win over placeholders, mirroring the server-side
+    // example generator: default → const → first enum value.
+    if (node.default !== undefined) return node.default;
+    if (node.const !== undefined) return node.const;
+    if (Array.isArray(node.enum) && node.enum.length > 0) {
+      var firstNonNull = node.enum.filter(function (v) { return v !== null; })[0];
+      return firstNonNull !== undefined ? firstNonNull : node.enum[0];
+    }
     switch (node.type) {
       case 'object': {
         var obj = {};

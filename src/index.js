@@ -5,7 +5,7 @@
 // The authoritative declarations for TypeScript consumers live in index.d.ts.
 
 /**
- * @typedef {{ type: string, properties?: Record<string, SchemaNode>, items?: SchemaNode }} SchemaNode
+ * @typedef {{ type: string, properties?: Record<string, SchemaNode>, items?: SchemaNode, optional?: boolean, nullable?: boolean, enum?: any[], default?: any, const?: any }} SchemaNode
  */
 
 /**
@@ -410,6 +410,53 @@ const s = {
    * @returns {SchemaNode}
    */
   optional: (schema) => Object.assign({}, schema, { optional: true }),
+  /**
+   * A fixed set of allowed values. The value type is inferred from the first
+   * entry (`string` by default). Emitted as OpenAPI `enum`; the first value is
+   * used when generating request/response examples.
+   *
+   * @param {Array<string|number|boolean|null>} values
+   * @returns {SchemaNode}
+   */
+  enum: (values) => {
+    const list = Array.isArray(values) ? values : [];
+    const first = list.find((v) => v !== null && v !== undefined);
+    const type = typeof first === 'number' ? 'number'
+      : typeof first === 'boolean' ? 'boolean'
+      : 'string';
+    return { type, enum: list.slice() };
+  },
+  /**
+   * A single fixed value (OpenAPI `const`). The type is inferred from the value.
+   *
+   * @param {string|number|boolean|null} value
+   * @returns {SchemaNode}
+   */
+  literal: (value) => {
+    const type = value === null ? 'null'
+      : typeof value === 'number' ? 'number'
+      : typeof value === 'boolean' ? 'boolean'
+      : 'string';
+    return { type, const: value };
+  },
+  /**
+   * Marks a schema node as nullable — the value may be `null` in addition to
+   * its declared type. Emitted as OpenAPI 3.1 `type: [<type>, 'null']`.
+   *
+   * @param {SchemaNode} schema
+   * @returns {SchemaNode}
+   */
+  nullable: (schema) => Object.assign({}, schema, { nullable: true }),
+  /**
+   * Attaches a default value to a schema node. The field becomes optional (it
+   * may be omitted from requests) and the default is used when generating
+   * request examples, cURL/Postman exports, and mock responses.
+   *
+   * @param {SchemaNode} schema
+   * @param {any} value
+   * @returns {SchemaNode}
+   */
+  default: (schema, value) => Object.assign({}, schema, { default: value, optional: true }),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
