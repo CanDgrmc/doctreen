@@ -94,11 +94,6 @@ function createSchemaContext() {
     if (node == null || typeof node !== 'object') return null;
     const t = node.type;
 
-    if (t === 'string')  return { type: 'string' };
-    if (t === 'number')  return { type: 'number' };
-    if (t === 'boolean') return { type: 'boolean' };
-    if (t === 'null')    return { type: 'null' };
-
     if (t === 'object') {
       const props = node.properties || {};
       const out = { type: 'object', properties: {} };
@@ -110,16 +105,38 @@ function createSchemaContext() {
         if (!(child && child.optional === true)) required.push(key);
       }
       if (required.length > 0) out.required = required;
+      decorate(out, node);
       // Track anonymous object subtrees for later auto-dedup.
       if (!nodeToName.has(node)) trackAnon(out);
       return out;
     }
 
-    if (t === 'array') {
-      return { type: 'array', items: convert(node.items) || {} };
+    let out;
+    if (t === 'string' || t === 'number' || t === 'boolean' || t === 'null') {
+      out = { type: t };
+    } else if (t === 'array') {
+      out = { type: 'array', items: convert(node.items) || {} };
+    } else {
+      out = {};
     }
+    return decorate(out, node);
+  }
 
-    return {};
+  /**
+   * Copy the value-level facets (`enum`, `const`, `default`) from a SchemaNode
+   * onto its OpenAPI Schema Object, and fold `nullable` into an OpenAPI 3.1
+   * `type: [<type>, 'null']` union. Mutates and returns `out`.
+   */
+  function decorate(out, node) {
+    if (Array.isArray(node.enum) && node.enum.length > 0) out.enum = node.enum.slice();
+    if (node.const !== undefined) out.const = node.const;
+    if (node.default !== undefined) out.default = node.default;
+
+    if (node.nullable === true && typeof out.type === 'string' && out.type !== 'null') {
+      out.type = [out.type, 'null'];
+      if (Array.isArray(out.enum) && out.enum.indexOf(null) === -1) out.enum.push(null);
+    }
+    return out;
   }
 
   function trackAnon(openapiSchema) {
