@@ -4,6 +4,18 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.1] — 2026-07-02
+
+### Fixed
+
+- **`codegen` no longer emits invalid TypeScript for nullable objects.** A
+  nullable object schema — OpenAPI 3.1 `type: ["object", "null"]` or 3.0
+  `nullable: true` — renders as `{ … } | null`, which starts with `{` but is
+  not a bare object body. The generator mistook it for an interface body and
+  produced `export interface Profile { … } | null` (a syntax error). Such
+  schemas now emit a valid `type` alias (`export type Profile = { … } | null`);
+  plain objects still emit `export interface`.
+
 ## [1.14.0] — 2026-07-02
 
 ### Added

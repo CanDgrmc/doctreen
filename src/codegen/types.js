@@ -23,6 +23,19 @@
 const { schemaToTs, createContext, tsIdentifier, safeKey } = require('./openapi-to-ts');
 const { operationDescriptors } = require('./operations');
 
+/**
+ * True only for a bare object literal (`{ … }`) that can follow
+ * `export interface Name`. A nullable/union object renders as `{ … } | null`,
+ * which still starts with `{` but must become a `type` alias — appending it
+ * after `export interface Name ` produces invalid TypeScript.
+ *
+ * @param {string} ts
+ * @returns {boolean}
+ */
+function isObjectLiteral(ts) {
+  return ts.charAt(0) === '{' && ts.charAt(ts.length - 1) === '}';
+}
+
 function generateTypes(doc, opts) {
   opts = opts || {};
   const components = (doc.components && doc.components.schemas) || {};
@@ -41,7 +54,7 @@ function generateTypes(doc, opts) {
   for (const name of componentNames) {
     const id = tsIdentifier(name);
     const ts = schemaToTs(components[name], ctx, 0);
-    if (ts.startsWith('{')) {
+    if (isObjectLiteral(ts)) {
       lines.push('export interface ' + id + ' ' + ts);
     } else {
       lines.push('export type ' + id + ' = ' + ts + ';');
@@ -76,7 +89,7 @@ function generateTypes(doc, opts) {
 
     if (op.requestBody) {
       const t = schemaToTs(op.requestBody.schema, ctx, 0);
-      if (t.startsWith('{')) {
+      if (isObjectLiteral(t)) {
         lines.push('export interface ' + op.baseName + 'Body ' + t);
       } else {
         lines.push('export type ' + op.baseName + 'Body = ' + t + ';');
@@ -86,7 +99,7 @@ function generateTypes(doc, opts) {
 
     if (op.response) {
       const t = schemaToTs(op.response.schema, ctx, 0);
-      if (t.startsWith('{')) {
+      if (isObjectLiteral(t)) {
         lines.push('export interface ' + op.baseName + 'Response ' + t);
       } else {
         lines.push('export type ' + op.baseName + 'Response = ' + t + ';');

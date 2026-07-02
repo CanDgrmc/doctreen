@@ -5,7 +5,7 @@
 [**Docs →**](https://doctreen.dev) &nbsp;·&nbsp; [**Live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](https://doctreen.dev/docs/roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.14.0** &nbsp;—&nbsp; **`s.enum`, `s.nullable`, `s.default`, and `s.literal` schema builders**. **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.14.0)**
+> **What's new in v1.14.1** &nbsp;—&nbsp; **`codegen` no longer emits invalid TypeScript for nullable objects.** A nullable object schema — OpenAPI 3.1 `type: ["object", "null"]` or 3.0 `nullable: true` — renders as `{ … } | null`, which starts with `{` but is not a bare object… **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.14.1)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder) and you get an interactive docs UI, OpenAPI 3.1 export, runnable integration flows, and 422-on-invalid-request validation — for **Express, Fastify, Hono, Koa, and NestJS**. No router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
