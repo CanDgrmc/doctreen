@@ -27,11 +27,11 @@
  *
  * @typedef {{ enabled?: boolean, sampleRate?: number, maxSamples?: number, webhook?: string, onDrift?: Function, store?: { record: Function, report: Function, reset: Function }, logLevel?: 'warn'|'silent', allowReset?: boolean, resetToken?: string }} DriftConfig
  *
- * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean|{ enabled?: boolean, writeback?: boolean }, openapi?: OpenApiConfig, headHtml?: string, drift?: DriftConfig|boolean }} UserConfig
+ * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean|{ enabled?: boolean, writeback?: boolean, response?: 'off'|'warn'|'throw'|boolean }, openapi?: OpenApiConfig, headHtml?: string, drift?: DriftConfig|boolean }} UserConfig
  */
 
 /**
- * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: { enabled: boolean, writeback: boolean }, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string, allowReset: boolean, resetToken: string|null } }} NormalizedConfig
+ * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: { enabled: boolean, writeback: boolean, response: 'off'|'warn'|'throw' }, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string, allowReset: boolean, resetToken: string|null } }} NormalizedConfig
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -307,9 +307,24 @@ function normalizeValidate(input) {
     return {
       enabled: input.enabled !== false,
       writeback: Boolean(input.writeback),
+      response: normalizeResponseMode(input.response),
     };
   }
-  return { enabled: Boolean(input), writeback: false };
+  return { enabled: Boolean(input), writeback: false, response: 'off' };
+}
+
+/**
+ * Normalise the `validate.response` dev-mode assertion mode (v1.15).
+ * `'throw'` → reject a non-conforming response; `'warn'`/`true` → log and
+ * pass through; anything else → `'off'`.
+ *
+ * @param {string|boolean|undefined} v
+ * @returns {'off'|'warn'|'throw'}
+ */
+function normalizeResponseMode(v) {
+  if (v === 'throw') return 'throw';
+  if (v === 'warn' || v === true) return 'warn';
+  return 'off';
 }
 
 /**

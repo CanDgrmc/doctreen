@@ -104,6 +104,8 @@ export interface RouteEntry {
    * runtime validation. `SchemaNode` versions live in `requestSchema`.
    */
   requestValidators?: { body: unknown | null; query: unknown | null; params?: unknown | null };
+  /** Original Zod response schema (v1.15) for dev-mode response assertion. */
+  responseValidator?: unknown | null;
   /** Per-route validation override (v1.6+). undefined → inherit adapter default. */
   validateOverride?: boolean;
   /** When true, this route is omitted from the docs UI and OpenAPI export (v1.8+). */
@@ -231,9 +233,13 @@ export interface UserConfig {
    *     - Koa — written to `ctx.request.body` and `ctx.query`; coerced path
    *       params are exposed on `ctx.state.doctreenValidated.params` (the Koa
    *       router re-derives `ctx.params` from the raw URL after validation).
+   * - `response` — dev-mode response assertion (v1.15). `'warn'` logs a mismatch
+   *   between the handler's response and the declared Zod `response` schema and
+   *   passes it through; `'throw'` surfaces a 500 in development; `'off'`
+   *   (default) disables it. Never coerces the response.
    * @default false
    */
-  validate?: boolean | { enabled?: boolean; writeback?: boolean };
+  validate?: boolean | { enabled?: boolean; writeback?: boolean; response?: 'off' | 'warn' | 'throw' | boolean };
 
   /** OpenAPI-specific options applied to `<docsPath>/openapi.json` (v1.7+). */
   openapi?: OpenApiConfig;
@@ -422,7 +428,7 @@ export interface NormalizedConfig {
   groups: Record<string, { description: string }>;
   flows: FlowDefinition[] | null;
   flowsPath: string | null;
-  validate: { enabled: boolean; writeback: boolean };
+  validate: { enabled: boolean; writeback: boolean; response: 'off' | 'warn' | 'throw' };
   openapi: {
     servers: OpenApiServer[];
     securitySchemes: Record<string, unknown> | null;

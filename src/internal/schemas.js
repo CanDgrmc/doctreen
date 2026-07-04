@@ -56,7 +56,11 @@ function normalizeRouteSchemas(schemas) {
     out.request = { body: convertSchema(out.request), query: null };
   }
 
+  // Preserve the original Zod response schema (when present) for v1.15
+  // dev-mode response assertion — the SchemaNode form is lossy.
+  const originalResponse = isZodSchema(out.response) ? out.response : null;
   if ('response' in out) out.response = convertSchema(out.response);
+  if (originalResponse) out.responseValidator = originalResponse;
 
   if (out.errors && typeof out.errors === 'object') {
     const normErrors = {};

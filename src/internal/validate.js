@@ -143,6 +143,73 @@ function buildErrorBody(issues) {
 }
 
 /**
+ * Validate a response body against the declared Zod response schema (v1.15
+ * dev-mode assertion). Unlike request validation this never coerces or mutates
+ * the payload — it only reports mismatches.
+ *
+ * Runs *synchronously* (`safeParse`) so adapters can assert inside the sync
+ * response path (e.g. Express `res.json`) and reject before the body is sent.
+ * A schema with async refinements can't be checked synchronously — that case
+ * is skipped (treated as ok) rather than crashing the response.
+ *
+ * @param {any} schema  - original Zod response schema (or null)
+ * @param {any} body    - the response payload the handler produced
+ * @returns {{ ok: true } | { ok: false, issues: Array<{path:string,message:string,code:string}> }}
+ */
+function validateResponse(schema, body) {
+  if (!schema || typeof schema.safeParse !== 'function') return { ok: true };
+  let result;
+  try {
+    result = schema.safeParse(body);
+  } catch (e) {
+    // Zod throws synchronously when a schema needs async parsing. Response
+    // assertion is a best-effort dev aid — skip rather than break the response.
+    return { ok: true };
+  }
+  if (result.success) return { ok: true };
+  const issues = ((result.error && result.error.issues) || []).map(function (i) {
+    return flattenIssue('response', i);
+  });
+  return { ok: false, issues: issues };
+}
+
+/**
+ * The response-assertion mode from the normalised `validate` config:
+ * `'off'` (default), `'warn'`, or `'throw'`.
+ *
+ * @param {boolean|{response?:string}} adapterDefault
+ * @returns {'off'|'warn'|'throw'}
+ */
+function responseMode(adapterDefault) {
+  if (adapterDefault && typeof adapterDefault === 'object' && adapterDefault.response) {
+    return adapterDefault.response;
+  }
+  return 'off';
+}
+
+/**
+ * Report a response-schema mismatch according to `mode`. In `'throw'` mode a
+ * tagged Error is thrown (adapters surface it as a 500 in development); in
+ * `'warn'` mode the mismatch is logged and the original response passes
+ * through unchanged.
+ *
+ * @param {'warn'|'throw'} mode
+ * @param {string} label   - e.g. 'GET /users/:id'
+ * @param {Array<{path:string,message:string,code:string}>} issues
+ */
+function reportResponseIssues(mode, label, issues) {
+  const detail = issues.map(function (i) { return '  - ' + i.path + ': ' + i.message; }).join('\n');
+  const msg = '[doctreen] response for ' + label + ' does not match the declared schema:\n' + detail;
+  if (mode === 'throw') {
+    const err = new Error(msg);
+    /** @type {any} */ (err).doctreenResponseInvalid = true;
+    throw err;
+  }
+  // eslint-disable-next-line no-console
+  console.warn(msg);
+}
+
+/**
  * Decide whether validation should run for a given route, combining the
  * adapter-level config with the per-route override stored on the entry.
  *
@@ -179,4 +246,13 @@ function shouldWriteback(adapterDefault) {
   return !!(adapterDefault && typeof adapterDefault === 'object' && adapterDefault.writeback);
 }
 
-module.exports = { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback };
+module.exports = {
+  validateRequest,
+  validateResponse,
+  buildErrorBody,
+  shouldValidate,
+  shouldWriteback,
+  applyWriteback,
+  responseMode,
+  reportResponseIssues,
+};

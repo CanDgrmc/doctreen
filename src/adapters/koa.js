@@ -14,7 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback } = require('../internal/validate');
+const { validateRequest, validateResponse, buildErrorBody, shouldValidate, shouldWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
 const { extractPathParams } = require('../internal/path-params');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
@@ -88,6 +88,7 @@ function seedEntry(entry, handler) {
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
+    if (predef.responseValidator)                                        entry.responseValidator = predef.responseValidator;
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
     if (predef.hidden === true)                                          entry.hidden            = true;
     if (predef.security !== undefined)                                   entry.security          = predef.security;
@@ -253,7 +254,7 @@ function koaAdapter(router, userConfig) {
   // chain for every subsequent route. When `validate: true`, koaAdapter must
   // be called BEFORE the user's routes — @koa/router does not retro-apply
   // middleware to already-registered routes.
-  if (config.validate.enabled) {
+  if (config.validate.enabled || config.validate.response !== 'off') {
     router.use(async function docLibValidate(ctx, next) {
       const method = ctx.method.toUpperCase();
       const path   = ctx.path;
@@ -261,43 +262,53 @@ function koaAdapter(router, userConfig) {
 
       if (!cachedRegistry || config.liveReload) refreshRegistry();
       const entry = cachedRegistry.findByRequestPath(method, path);
-      if (!entry || !entry.requestValidators) return next();
-      if (!shouldValidate(config.validate, entry.validateOverride)) return next();
+      if (!entry) return next();
 
-      const body   = ctx.request && ctx.request.body;
-      const query  = ctx.query || {};
-      // Router-level middleware doesn't have the matched route's params bound,
-      // so derive them from the pattern (v1.15). Falls back to ctx.params.
-      const params = extractPathParams(entry.path, ctx.path) || ctx.params || {};
-      const result = await validateRequest(entry.requestValidators, { body: body, query: query, params: params });
-      if (!result.ok) {
-        ctx.status = 422;
-        ctx.body   = buildErrorBody(result.issues);
-        return;
-      }
-      // v1.15 write-back — opt-in via `validate: { writeback: true }`.
-      //   - body  → ctx.request.body (plain writable property) ✔
-      //   - query → ctx.query delegates to a getter that re-parses the
-      //     querystring (losing coerced types), so we shadow `query` on the
-      //     request instance to serve the parsed value verbatim ✔
-      //   - params → @koa/router re-derives ctx.params (raw captures) for the
-      //     matched route layer *after* this router-level middleware runs, so
-      //     writing ctx.params here doesn't stick. Coerced path params are
-      //     instead exposed on ctx.state.doctreenValidated.params.
-      if (shouldWriteback(config.validate)) {
-        const data = result.data || {};
-        if ('body' in data && ctx.request) ctx.request.body = data.body;
-        if ('query' in data && ctx.request) {
-          try {
-            Object.defineProperty(ctx.request, 'query', {
-              value: data.query, writable: true, enumerable: true, configurable: true,
-            });
-          } catch (_) { /* frozen request — skip query write-back */ }
+      // ── Request validation (before the handler) ─────────────────────────
+      if (entry.requestValidators && shouldValidate(config.validate, entry.validateOverride)) {
+        const body   = ctx.request && ctx.request.body;
+        const query  = ctx.query || {};
+        // Router-level middleware doesn't have the matched route's params
+        // bound, so derive them from the pattern (v1.15). Falls back to ctx.params.
+        const params = extractPathParams(entry.path, ctx.path) || ctx.params || {};
+        const result = await validateRequest(entry.requestValidators, { body: body, query: query, params: params });
+        if (!result.ok) {
+          ctx.status = 422;
+          ctx.body   = buildErrorBody(result.issues);
+          return;
         }
-        ctx.state = ctx.state || {};
-        ctx.state.doctreenValidated = data;
+        // v1.15 write-back — opt-in via `validate: { writeback: true }`.
+        //   - body  → ctx.request.body (plain writable property) ✔
+        //   - query → ctx.query delegates to a getter that re-parses the
+        //     querystring (losing coerced types), so we shadow `query` on the
+        //     request instance to serve the parsed value verbatim ✔
+        //   - params → @koa/router re-derives ctx.params (raw captures) for the
+        //     matched route layer *after* this router-level middleware runs, so
+        //     writing ctx.params here doesn't stick. Coerced path params are
+        //     instead exposed on ctx.state.doctreenValidated.params.
+        if (shouldWriteback(config.validate)) {
+          const data = result.data || {};
+          if ('body' in data && ctx.request) ctx.request.body = data.body;
+          if ('query' in data && ctx.request) {
+            try {
+              Object.defineProperty(ctx.request, 'query', {
+                value: data.query, writable: true, enumerable: true, configurable: true,
+              });
+            } catch (_) { /* frozen request — skip query write-back */ }
+          }
+          ctx.state = ctx.state || {};
+          ctx.state.doctreenValidated = data;
+        }
       }
-      return next();
+
+      await next();
+
+      // ── Response assertion (v1.15 dev-mode) ─────────────────────────────
+      const rMode = responseMode(config.validate);
+      if (rMode !== 'off' && entry.responseValidator) {
+        const rv = validateResponse(entry.responseValidator, ctx.body);
+        if (!rv.ok) reportResponseIssues(rMode, method + ' ' + entry.path, rv.issues);
+      }
     });
   }
 

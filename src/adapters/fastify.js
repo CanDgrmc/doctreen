@@ -14,7 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback } = require('../internal/validate');
+const { validateRequest, validateResponse, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -122,6 +122,7 @@ function seedEntryFromHandler(entry, handler, nativeSchema) {
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
+    if (predef.responseValidator)                                        entry.responseValidator = predef.responseValidator;
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
     if (predef.hidden === true)                                          entry.hidden            = true;
     if (predef.security !== undefined)                                   entry.security          = predef.security;
@@ -264,6 +265,23 @@ function fastifyAdapter(fastify, userConfig) {
     if (shouldWriteback(config.validate)) {
       applyWriteback(req, result.data);
     }
+  });
+
+  // ── Response assertion (v1.15 dev-mode) ─────────────────────────────────
+  // preSerialization runs with the response *object* before it is serialised,
+  // so we can assert it against the declared Zod response schema. 'warn' logs
+  // and passes through; 'throw' bubbles a 500 in development.
+  fastify.addHook('preSerialization', async function (req, reply, payload) {
+    const rMode = responseMode(config.validate);
+    if (rMode === 'off') return payload;
+    const routeMethod = (req.method || '').toUpperCase();
+    const routePath   = (req.routeOptions && req.routeOptions.url) || req.routerPath || '';
+    if (!routePath) return payload;
+    const entry = registry.find(routeMethod, routePath);
+    if (!entry || !entry.responseValidator) return payload;
+    const rv = validateResponse(entry.responseValidator, payload);
+    if (!rv.ok) reportResponseIssues(rMode, routeMethod + ' ' + routePath, rv.issues);
+    return payload;
   });
 
   // ── Schema drift detection (v1.10+) ─────────────────────────────────────

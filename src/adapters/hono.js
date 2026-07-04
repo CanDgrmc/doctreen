@@ -14,7 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback } = require('../internal/validate');
+const { validateRequest, validateResponse, buildErrorBody, shouldValidate, shouldWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
 const { extractPathParams } = require('../internal/path-params');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
@@ -89,6 +89,7 @@ function seedEntry(entry, handler) {
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
+    if (predef.responseValidator)                                        entry.responseValidator = predef.responseValidator;
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
     if (predef.hidden === true)                                          entry.hidden            = true;
     if (predef.security !== undefined)                                   entry.security          = predef.security;
@@ -235,7 +236,7 @@ function honoAdapter(app, userConfig) {
   // chain for every subsequent route. Users must call honoAdapter BEFORE
   // their routes when `validate: true` — Hono does not retro-apply
   // middleware to routes registered earlier.
-  if (config.validate.enabled) {
+  if (config.validate.enabled || config.validate.response !== 'off') {
     app.use('*', async function (c, next) {
       const method = c.req.method;
       const path   = c.req.path;
@@ -243,51 +244,65 @@ function honoAdapter(app, userConfig) {
 
       if (!cachedRegistry || config.liveReload) refreshRegistry();
       const entry = cachedRegistry.findByRequestPath(method, path);
-      if (!entry || !entry.requestValidators) return next();
-      if (!shouldValidate(config.validate, entry.validateOverride)) return next();
+      if (!entry) return next();
 
-      let body;
-      try { body = await c.req.json(); } catch (_) { body = undefined; }
-      const url = new URL(c.req.url);
-      const query = Object.fromEntries(url.searchParams);
-      // The wildcard middleware doesn't have the matched route's params bound
-      // (c.req.param() reflects the '*' pattern), so derive them from the
-      // matched route pattern against the live path (v1.15).
-      const params = extractPathParams(entry.path, c.req.path);
+      // ── Request validation (before the handler) ─────────────────────────
+      if (entry.requestValidators && shouldValidate(config.validate, entry.validateOverride)) {
+        let body;
+        try { body = await c.req.json(); } catch (_) { body = undefined; }
+        const url = new URL(c.req.url);
+        const query = Object.fromEntries(url.searchParams);
+        // The wildcard middleware doesn't have the matched route's params bound
+        // (c.req.param() reflects the '*' pattern), so derive them from the
+        // matched route pattern against the live path (v1.15).
+        const params = extractPathParams(entry.path, c.req.path);
 
-      const result = await validateRequest(entry.requestValidators, { body: body, query: query, params: params });
-      if (!result.ok) return c.json(buildErrorBody(result.issues), 422);
-      // v1.15 write-back — opt-in via `validate: { writeback: true }`. Hono's
-      // request is read through accessor methods rather than plain properties,
-      // so we overlay the parsed (coerced/defaulted) values by wrapping the
-      // three accessors on this request instance; unvalidated keys fall through
-      // to the originals. The full parsed bag is also stashed on the context
-      // (`c.get('doctreenValidated')`) for handlers that prefer an explicit read.
-      if (shouldWriteback(config.validate)) {
-        const data = result.data || {};
-        const rq = c.req;
-        if ('params' in data && typeof rq.param === 'function') {
-          const orig = rq.param.bind(rq);
-          const pv = data.params || {};
-          rq.param = function (name) {
-            if (name === undefined) return Object.assign({}, orig(), pv);
-            return pv[name] !== undefined ? pv[name] : orig(name);
-          };
+        const result = await validateRequest(entry.requestValidators, { body: body, query: query, params: params });
+        if (!result.ok) return c.json(buildErrorBody(result.issues), 422);
+        // v1.15 write-back — opt-in via `validate: { writeback: true }`. Hono's
+        // request is read through accessor methods rather than plain properties,
+        // so we overlay the parsed (coerced/defaulted) values by wrapping the
+        // three accessors on this request instance; unvalidated keys fall through
+        // to the originals. The full parsed bag is also stashed on the context
+        // (`c.get('doctreenValidated')`) for handlers that prefer an explicit read.
+        if (shouldWriteback(config.validate)) {
+          const data = result.data || {};
+          const rq = c.req;
+          if ('params' in data && typeof rq.param === 'function') {
+            const orig = rq.param.bind(rq);
+            const pv = data.params || {};
+            rq.param = function (name) {
+              if (name === undefined) return Object.assign({}, orig(), pv);
+              return pv[name] !== undefined ? pv[name] : orig(name);
+            };
+          }
+          if ('query' in data && typeof rq.query === 'function') {
+            const orig = rq.query.bind(rq);
+            const qv = data.query || {};
+            rq.query = function (name) {
+              if (name === undefined) return Object.assign({}, orig(), qv);
+              return qv[name] !== undefined ? qv[name] : orig(name);
+            };
+          }
+          if ('body' in data) {
+            rq.json = async function () { return data.body; };
+          }
+          c.set('doctreenValidated', data);
         }
-        if ('query' in data && typeof rq.query === 'function') {
-          const orig = rq.query.bind(rq);
-          const qv = data.query || {};
-          rq.query = function (name) {
-            if (name === undefined) return Object.assign({}, orig(), qv);
-            return qv[name] !== undefined ? qv[name] : orig(name);
-          };
-        }
-        if ('body' in data) {
-          rq.json = async function () { return data.body; };
-        }
-        c.set('doctreenValidated', data);
       }
-      return next();
+
+      await next();
+
+      // ── Response assertion (v1.15 dev-mode) ─────────────────────────────
+      const rMode = responseMode(config.validate);
+      if (rMode !== 'off' && entry.responseValidator && c.res) {
+        let respBody;
+        try { respBody = await c.res.clone().json(); } catch (_) { respBody = undefined; }
+        if (respBody !== undefined) {
+          const rv = validateResponse(entry.responseValidator, respBody);
+          if (!rv.ok) reportResponseIssues(rMode, method + ' ' + entry.path, rv.issues);
+        }
+      }
     });
   }
 

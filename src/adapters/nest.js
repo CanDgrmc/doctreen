@@ -5,7 +5,7 @@
 const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = require('../index');
 const { serveDocsUI } = require('../ui/index');
 const { convertSchema, normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback } = require('../internal/validate');
+const { validateRequest, validateResponse, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, reportResponseIssues } = require('../internal/validate');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -533,7 +533,7 @@ function nestAdapter(app, userConfig) {
   // and the controller, so `req.body` is reliably parsed by the time we read
   // it. Going via the guard system also means our 422 response is shaped by
   // NestJS's HttpException pipeline (compatible with global filters).
-  if (config.validate && typeof app.useGlobalGuards === 'function') {
+  if (config.validate.enabled && typeof app.useGlobalGuards === 'function') {
     let HttpException = null;
     try { HttpException = require('@nestjs/common').HttpException; } catch (_) { /* no-op */ }
 
@@ -573,6 +573,37 @@ function nestAdapter(app, userConfig) {
       },
     };
     app.useGlobalGuards(guard);
+  }
+
+  // ── Response assertion (v1.15 dev-mode) ───────────────────────────────────
+  // Guards can't see the response, so a global interceptor maps over the
+  // handler's return value and asserts it against the declared Zod response
+  // schema. 'warn' logs; 'throw' errors the stream → NestJS 500 in dev.
+  if (config.validate.response !== 'off' && typeof app.useGlobalInterceptors === 'function') {
+    let mapOp = null;
+    try { mapOp = require('rxjs/operators').map; } catch (_) { /* no-op */ }
+    if (!mapOp) { try { mapOp = require('rxjs').map; } catch (_) { /* no-op */ } }
+
+    if (mapOp) {
+      const rMode = config.validate.response;
+      const interceptor = {
+        intercept(context, next) {
+          const handler = context.getHandler();
+          const docSchema = handler ? Reflect.getMetadata(DOC_ROUTE_METADATA, handler) : null;
+          const schema = docSchema && isZodInstance(docSchema.response) ? docSchema.response : null;
+          if (!schema) return next.handle();
+          const req = context.switchToHttp().getRequest();
+          const label = ((req && req.method) || 'GET') + ' ' +
+            ((req && ((req.route && req.route.path) || req.url)) || '');
+          return next.handle().pipe(mapOp(function (data) {
+            const rv = validateResponse(schema, data);
+            if (!rv.ok) reportResponseIssues(rMode, label, rv.issues);
+            return data;
+          }));
+        },
+      };
+      app.useGlobalInterceptors(interceptor);
+    }
   }
 }
 
