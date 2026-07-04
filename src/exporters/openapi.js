@@ -25,6 +25,7 @@
  */
 
 const { _getNamedSchemas } = require('../index');
+const { getSchemaName } = require('../internal/named-schema');
 
 // ─── SchemaNode → OpenAPI Schema Object ─────────────────────────────────────
 
@@ -73,8 +74,9 @@ function createSchemaContext() {
   function convert(node) {
     if (node == null || typeof node !== 'object') return null;
 
-    // Named schema → register + ref.
-    const name = nodeToName.get(node);
+    // Named schema → register + ref. Resolved by the defineSchema name tag
+    // (survives Zod conversion) or, as a fallback, by SchemaNode identity.
+    const name = getSchemaName(node) || nodeToName.get(node);
     if (name) {
       if (!components[name]) {
         // Reserve the slot before recursing, so cycles (defineSchema A →

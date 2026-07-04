@@ -537,6 +537,10 @@ const _schemaRegistry = new Map();
  */
 function defineSchema(name, schema) {
   _schemaRegistry.set(name, schema);
+  // Tag the schema so it is recognised by name after conversion — this is what
+  // makes Zod-defined named schemas (whose conversion breaks object identity)
+  // resolve to `$ref: '#/components/schemas/<name>'` in the OpenAPI export.
+  require('./internal/named-schema').setSchemaName(schema, name);
   return schema;
 }
 

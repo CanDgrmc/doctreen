@@ -1,14 +1,34 @@
 'use strict';
 
+const { getSchemaName, setSchemaName } = require('../internal/named-schema');
+
 /**
  * Converts a Zod v3 schema to doctreen's internal SchemaNode format.
  * Returns { type: 'unknown' } for unrecognised or too-deeply-nested types.
+ *
+ * Thin wrapper over `_zodToSchemaNode` that carries a `defineSchema` name onto
+ * the produced node. Because recursion goes through this wrapper, *nested*
+ * named schemas are tagged too — so they also emit `$ref`s in the OpenAPI export.
  *
  * @param {any} zodSchema
  * @param {number} [depth=0]
  * @returns {import('../index').SchemaNode}
  */
 function zodToSchemaNode(zodSchema, depth) {
+  const node = _zodToSchemaNode(zodSchema, depth);
+  const name = getSchemaName(zodSchema);
+  if (name && node && typeof node === 'object' && !getSchemaName(node)) {
+    setSchemaName(node, name);
+  }
+  return node;
+}
+
+/**
+ * @param {any} zodSchema
+ * @param {number} [depth=0]
+ * @returns {import('../index').SchemaNode}
+ */
+function _zodToSchemaNode(zodSchema, depth) {
   depth = depth || 0;
   if (depth > 5 || zodSchema == null) return { type: 'unknown' };
 

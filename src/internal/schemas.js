@@ -1,6 +1,7 @@
 'use strict';
 
 const { isZodSchema, zodToSchemaNode } = require('../adapters/zod');
+const { getSchemaName, setSchemaName } = require('./named-schema');
 
 /**
  * Accepts a SchemaNode (from the `s` builder) or a Zod schema and returns a
@@ -11,9 +12,18 @@ const { isZodSchema, zodToSchemaNode } = require('../adapters/zod');
  */
 function convertSchema(schema) {
   if (schema == null) return null;
-  if (isZodSchema(schema)) return zodToSchemaNode(schema);
-  if (typeof schema === 'object' && typeof schema.type === 'string') return schema;
-  return null;
+  let node;
+  if (isZodSchema(schema)) node = zodToSchemaNode(schema);
+  else if (typeof schema === 'object' && typeof schema.type === 'string') node = schema;
+  else return null;
+  // Carry a defineSchema name onto the converted node (a Zod conversion yields a
+  // fresh object, losing the tag set on the original). SchemaNode inputs are
+  // passed through unchanged, so their tag is already present.
+  const name = getSchemaName(schema);
+  if (name && node && typeof node === 'object' && !getSchemaName(node)) {
+    setSchemaName(node, name);
+  }
+  return node;
 }
 
 /**
