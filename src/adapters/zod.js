@@ -2,6 +2,14 @@
 
 const { getSchemaName, setSchemaName } = require('../internal/named-schema');
 
+// Maximum nesting depth for inline Zod → SchemaNode conversion. Object/array
+// nesting is linear (each node converts once), so a deep but non-recursive
+// schema — e.g. a menu → categories → items → variants → options tree — needs
+// comfortable headroom; the old cap of 5 truncated such trees to `unknown`.
+// The cap also bounds unnamed self-referential (`z.lazy`) schemas; the clean
+// way to express those is `defineSchema`, which emits a terminating `$ref`.
+const MAX_SCHEMA_DEPTH = 12;
+
 /**
  * Converts a Zod v3 schema to doctreen's internal SchemaNode format.
  * Returns { type: 'unknown' } for unrecognised or too-deeply-nested types.
@@ -30,7 +38,7 @@ function zodToSchemaNode(zodSchema, depth) {
  */
 function _zodToSchemaNode(zodSchema, depth) {
   depth = depth || 0;
-  if (depth > 5 || zodSchema == null) return { type: 'unknown' };
+  if (depth > MAX_SCHEMA_DEPTH || zodSchema == null) return { type: 'unknown' };
 
   const def = zodSchema._def;
   if (!def) return { type: 'unknown' };
