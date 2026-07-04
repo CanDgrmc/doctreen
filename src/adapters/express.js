@@ -32,7 +32,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
-const { validateRequest, validateResponse, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
+const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
@@ -224,6 +224,12 @@ function wrapRouteHandlers(handlerStack, entry, config) {
       if (predef.responseValidator) {
         entry.responseValidator = predef.responseValidator;
       }
+      if (predef.responses) {
+        entry.responses = predef.responses;
+      }
+      if (predef.responseValidators) {
+        entry.responseValidators = predef.responseValidators;
+      }
       if (predef.validate !== undefined) {
         entry.validateOverride = predef.validate;
       }
@@ -343,13 +349,16 @@ function wrapRouteHandlers(handlerStack, entry, config) {
 
             // ── Response assertion (v1.15 dev-mode) ─────────────────────────
             const rMode = responseMode(config && config.validate);
-            if (rMode !== 'off' && currentEntry.responseValidator) {
-              const rv = validateResponse(currentEntry.responseValidator, responseBody);
-              if (!rv.ok) {
-                // Restore json before surfacing so a thrown error (500 in dev)
-                // or a subsequent send doesn't re-enter this wrapper.
-                /** @type {any} */ (res).json = originalJson;
-                reportResponseIssues(rMode, currentEntry.method + ' ' + currentEntry.path, rv.issues);
+            if (rMode !== 'off') {
+              const rSchema = resolveResponseValidator(currentEntry, /** @type {any} */ (res).statusCode);
+              if (rSchema) {
+                const rv = validateResponse(rSchema, responseBody);
+                if (!rv.ok) {
+                  // Restore json before surfacing so a thrown error (500 in dev)
+                  // or a subsequent send doesn't re-enter this wrapper.
+                  /** @type {any} */ (res).json = originalJson;
+                  reportResponseIssues(rMode, currentEntry.method + ' ' + currentEntry.path, rv.issues);
+                }
               }
             }
 

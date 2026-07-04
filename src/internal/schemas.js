@@ -17,6 +17,74 @@ function convertSchema(schema) {
 }
 
 /**
+ * A status-keyed response map is a plain object whose keys are all 3-digit
+ * HTTP status codes (`{ 200: schema, 201: schema }`) — distinct from a single
+ * SchemaNode (has `.type`) or a Zod schema (has `._def`).
+ *
+ * @param {any} v
+ * @returns {boolean}
+ */
+function isStatusKeyedResponse(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  if (isZodSchema(v)) return false;
+  if (typeof v.type === 'string') return false; // SchemaNode
+  const keys = Object.keys(v);
+  if (keys.length === 0) return false;
+  return keys.every(function (k) { return /^\d{3}$/.test(k); });
+}
+
+/**
+ * Choose the primary status for back-compat single-schema consumers: prefer
+ * 200, then 201, then the lowest 2xx, then the lowest status overall.
+ *
+ * @param {string[]} statuses
+ * @returns {string|null}
+ */
+function pickPrimaryStatus(statuses) {
+  if (!statuses || statuses.length === 0) return null;
+  if (statuses.indexOf('200') !== -1) return '200';
+  if (statuses.indexOf('201') !== -1) return '201';
+  const sorted = statuses.slice().sort();
+  const twoxx = sorted.filter(function (s) { return s.charAt(0) === '2'; });
+  return (twoxx[0] || sorted[0]);
+}
+
+/**
+ * Normalise a `response` field into its four internal representations:
+ * a primary single SchemaNode (back-compat), a status-keyed SchemaNode map,
+ * a primary Zod validator, and a status-keyed Zod validator map. Shared by
+ * `normalizeRouteSchemas` and the NestJS adapter (which reads raw `@DocRoute`
+ * metadata directly).
+ *
+ * @param {any} value
+ * @returns {{ response: any, responses: object|null, responseValidator: any, responseValidators: object|null }}
+ */
+function normalizeResponseField(value) {
+  const out = { response: null, responses: null, responseValidator: null, responseValidators: null };
+  if (value === undefined) return out;
+
+  if (isStatusKeyedResponse(value)) {
+    const responses = {};
+    const responseValidators = {};
+    for (const code of Object.keys(value)) {
+      responses[code] = convertSchema(value[code]);
+      responseValidators[code] = isZodSchema(value[code]) ? value[code] : null;
+    }
+    const primary = pickPrimaryStatus(Object.keys(value));
+    out.responses = responses;
+    out.response = (primary && responses[primary]) || null;
+    if (Object.keys(responseValidators).some(function (k) { return responseValidators[k]; })) {
+      out.responseValidators = responseValidators;
+    }
+    out.responseValidator = (primary && responseValidators[primary]) || null;
+  } else {
+    out.response = convertSchema(value);
+    out.responseValidator = isZodSchema(value) ? value : null;
+  }
+  return out;
+}
+
+/**
  * Normalises a `defineRoute` / `@DocRoute` schemas bag so that any Zod schemas
  * inside it are converted to internal SchemaNode form at definition time.
  * Adapter consumption code can then treat all schemas uniformly.
@@ -56,11 +124,15 @@ function normalizeRouteSchemas(schemas) {
     out.request = { body: convertSchema(out.request), query: null };
   }
 
-  // Preserve the original Zod response schema (when present) for v1.15
-  // dev-mode response assertion — the SchemaNode form is lossy.
-  const originalResponse = isZodSchema(out.response) ? out.response : null;
-  if ('response' in out) out.response = convertSchema(out.response);
-  if (originalResponse) out.responseValidator = originalResponse;
+  // Response schema(s). `response` may be a single schema (SchemaNode or Zod)
+  // or a status-keyed map `{ 200: schema, 201: schema }` (v1.15).
+  if ('response' in out) {
+    const r = normalizeResponseField(out.response);
+    out.response = r.response; // back-compat single (primary 2xx)
+    if (r.responses)          out.responses          = r.responses;
+    if (r.responseValidators) out.responseValidators = r.responseValidators;
+    if (r.responseValidator)  out.responseValidator  = r.responseValidator;
+  }
 
   if (out.errors && typeof out.errors === 'object') {
     const normErrors = {};
@@ -140,4 +212,4 @@ function normaliseCallbacksBag(bag) {
   return out;
 }
 
-module.exports = { convertSchema, normalizeRouteSchemas, normaliseCallbacksBag };
+module.exports = { convertSchema, normalizeRouteSchemas, normaliseCallbacksBag, normalizeResponseField };

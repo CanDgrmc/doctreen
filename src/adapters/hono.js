@@ -14,7 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, validateResponse, buildErrorBody, shouldValidate, shouldWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
+const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
 const { extractPathParams } = require('../internal/path-params');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
@@ -90,6 +90,8 @@ function seedEntry(entry, handler) {
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
     if (predef.responseValidator)                                        entry.responseValidator = predef.responseValidator;
+    if (predef.responses)                                                entry.responses          = predef.responses;
+    if (predef.responseValidators)                                       entry.responseValidators = predef.responseValidators;
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
     if (predef.hidden === true)                                          entry.hidden            = true;
     if (predef.security !== undefined)                                   entry.security          = predef.security;
@@ -295,12 +297,15 @@ function honoAdapter(app, userConfig) {
 
       // ── Response assertion (v1.15 dev-mode) ─────────────────────────────
       const rMode = responseMode(config.validate);
-      if (rMode !== 'off' && entry.responseValidator && c.res) {
-        let respBody;
-        try { respBody = await c.res.clone().json(); } catch (_) { respBody = undefined; }
-        if (respBody !== undefined) {
-          const rv = validateResponse(entry.responseValidator, respBody);
-          if (!rv.ok) reportResponseIssues(rMode, method + ' ' + entry.path, rv.issues);
+      if (rMode !== 'off' && c.res) {
+        const rSchema = resolveResponseValidator(entry, c.res.status);
+        if (rSchema) {
+          let respBody;
+          try { respBody = await c.res.clone().json(); } catch (_) { respBody = undefined; }
+          if (respBody !== undefined) {
+            const rv = validateResponse(rSchema, respBody);
+            if (!rv.ok) reportResponseIssues(rMode, method + ' ' + entry.path, rv.issues);
+          }
         }
       }
     });

@@ -106,6 +106,10 @@ export interface RouteEntry {
   requestValidators?: { body: unknown | null; query: unknown | null; params?: unknown | null };
   /** Original Zod response schema (v1.15) for dev-mode response assertion. */
   responseValidator?: unknown | null;
+  /** Status-keyed response SchemaNodes (v1.15) when `response` is a `{ 201: … }` map. */
+  responses?: Record<string, SchemaNode | null>;
+  /** Status-keyed original Zod response validators (v1.15). */
+  responseValidators?: Record<string, unknown | null>;
   /** Per-route validation override (v1.6+). undefined → inherit adapter default. */
   validateOverride?: boolean;
   /** When true, this route is omitted from the docs UI and OpenAPI export (v1.8+). */

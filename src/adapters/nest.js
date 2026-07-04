@@ -4,8 +4,8 @@
 
 const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = require('../index');
 const { serveDocsUI } = require('../ui/index');
-const { convertSchema, normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, validateResponse, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, reportResponseIssues } = require('../internal/validate');
+const { convertSchema, normalizeRouteSchemas, normalizeResponseField } = require('../internal/schemas');
+const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, reportResponseIssues } = require('../internal/validate');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -93,7 +93,11 @@ function seedEntryFromSchema(entry, docSchema) {
   }
 
   if (docSchema.response != null) {
-    entry.responseSchema = convertSchema(docSchema.response);
+    const r = normalizeResponseField(docSchema.response);
+    entry.responseSchema = r.response;
+    if (r.responses)          entry.responses          = r.responses;
+    if (r.responseValidators) entry.responseValidators = r.responseValidators;
+    if (r.responseValidator)  entry.responseValidator  = r.responseValidator;
   }
 
   if (docSchema.errors) {
@@ -590,14 +594,24 @@ function nestAdapter(app, userConfig) {
         intercept(context, next) {
           const handler = context.getHandler();
           const docSchema = handler ? Reflect.getMetadata(DOC_ROUTE_METADATA, handler) : null;
-          const schema = docSchema && isZodInstance(docSchema.response) ? docSchema.response : null;
-          if (!schema) return next.handle();
-          const req = context.switchToHttp().getRequest();
+          if (!docSchema || docSchema.response == null) return next.handle();
+          // Normalise single-or-status-keyed response into validators.
+          const norm = normalizeResponseField(docSchema.response);
+          const faux = { responseValidators: norm.responseValidators, responseValidator: norm.responseValidator };
+          if (!faux.responseValidators && !faux.responseValidator) return next.handle();
+          const http = context.switchToHttp();
+          const req = http.getRequest();
+          const res = http.getResponse();
           const label = ((req && req.method) || 'GET') + ' ' +
             ((req && ((req.route && req.route.path) || req.url)) || '');
           return next.handle().pipe(mapOp(function (data) {
-            const rv = validateResponse(schema, data);
-            if (!rv.ok) reportResponseIssues(rMode, label, rv.issues);
+            const status = (res && res.statusCode) ||
+              ((req && req.method === 'POST') ? 201 : 200);
+            const schema = resolveResponseValidator(faux, status);
+            if (schema) {
+              const rv = validateResponse(schema, data);
+              if (!rv.ok) reportResponseIssues(rMode, label, rv.issues);
+            }
             return data;
           }));
         },

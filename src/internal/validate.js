@@ -174,6 +174,25 @@ function validateResponse(schema, body) {
 }
 
 /**
+ * Resolve the Zod response validator for a given response status code.
+ *
+ * For status-keyed responses (v1.15) only the schema declared for that exact
+ * status is asserted — an undeclared status is left unchecked. For a single
+ * declared response schema, that schema is used regardless of status.
+ *
+ * @param {any} entry   - RouteEntry (may carry `responseValidators` map or single `responseValidator`)
+ * @param {number|string} status
+ * @returns {any|null}
+ */
+function resolveResponseValidator(entry, status) {
+  if (!entry) return null;
+  if (entry.responseValidators) {
+    return entry.responseValidators[String(status)] || null;
+  }
+  return entry.responseValidator || null;
+}
+
+/**
  * The response-assertion mode from the normalised `validate` config:
  * `'off'` (default), `'warn'`, or `'throw'`.
  *
@@ -249,6 +268,7 @@ function shouldWriteback(adapterDefault) {
 module.exports = {
   validateRequest,
   validateResponse,
+  resolveResponseValidator,
   buildErrorBody,
   shouldValidate,
   shouldWriteback,

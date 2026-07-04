@@ -106,8 +106,8 @@ export interface RouteSchemas {
    * interchangeably. Zod schemas are converted to SchemaNode automatically.
    */
   request?: { body?: SchemaInput | null; query?: SchemaInput | null; params?: SchemaInput | null } | null;
-  /** Response payload schema. Accepts SchemaNode or Zod schema. */
-  response?: SchemaInput | null;
+  /** Response payload schema. Accepts a SchemaNode, a Zod schema, or a status-keyed map (`{ 201: schema }`, v1.15). */
+  response?: SchemaInput | Record<number, SchemaInput> | null;
   /**
    * Documented error responses keyed by HTTP status code.
    * @example

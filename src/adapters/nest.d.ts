@@ -29,8 +29,8 @@ export interface NestRouteSchemas {
     params?: SchemaInput | null;
   } | null;
 
-  /** Response payload schema. Accepts a SchemaNode or a Zod schema. */
-  response?: SchemaInput | null;
+  /** Response payload schema. Accepts a SchemaNode, a Zod schema, or a status-keyed map (`{ 201: schema }`, v1.15). */
+  response?: SchemaInput | Record<number, SchemaInput> | null;
 
   /**
    * Documented error responses keyed by HTTP status code.

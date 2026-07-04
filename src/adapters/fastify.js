@@ -14,7 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, validateResponse, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
+const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -123,6 +123,8 @@ function seedEntryFromHandler(entry, handler, nativeSchema) {
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
     if (predef.responseValidator)                                        entry.responseValidator = predef.responseValidator;
+    if (predef.responses)                                                entry.responses          = predef.responses;
+    if (predef.responseValidators)                                       entry.responseValidators = predef.responseValidators;
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
     if (predef.hidden === true)                                          entry.hidden            = true;
     if (predef.security !== undefined)                                   entry.security          = predef.security;
@@ -278,9 +280,12 @@ function fastifyAdapter(fastify, userConfig) {
     const routePath   = (req.routeOptions && req.routeOptions.url) || req.routerPath || '';
     if (!routePath) return payload;
     const entry = registry.find(routeMethod, routePath);
-    if (!entry || !entry.responseValidator) return payload;
-    const rv = validateResponse(entry.responseValidator, payload);
-    if (!rv.ok) reportResponseIssues(rMode, routeMethod + ' ' + routePath, rv.issues);
+    if (!entry) return payload;
+    const rSchema = resolveResponseValidator(entry, reply.statusCode);
+    if (rSchema) {
+      const rv = validateResponse(rSchema, payload);
+      if (!rv.ok) reportResponseIssues(rMode, routeMethod + ' ' + routePath, rv.issues);
+    }
     return payload;
   });
 

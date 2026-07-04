@@ -392,17 +392,35 @@ function buildRequestBody(entry, ctx) {
 
 function buildResponses(entry, ctx) {
   const responses = {};
-  const successCode = entry.method === 'POST' ? '201' : '200';
-  const successSchema = ctx.convert(entry.responseSchema);
-  const success = { description: 'Successful response' };
-  if (successSchema) {
-    const mediaType = { schema: successSchema };
-    if (entry.examples && (entry.examples.response || entry.examples.success)) {
-      attachExamplesToMediaType(mediaType, entry.examples.response || entry.examples.success);
+
+  if (entry.responses && typeof entry.responses === 'object') {
+    // Status-keyed responses (v1.15) — emit each declared status with its schema.
+    for (const code of Object.keys(entry.responses)) {
+      const schema = ctx.convert(entry.responses[code]);
+      const r = { description: 'Successful response' };
+      if (schema) {
+        const mediaType = { schema: schema };
+        // Per-status examples via `entry.examples.responses[<code>]`.
+        if (entry.examples && entry.examples.responses && entry.examples.responses[code]) {
+          attachExamplesToMediaType(mediaType, entry.examples.responses[code]);
+        }
+        r.content = { 'application/json': mediaType };
+      }
+      responses[code] = r;
     }
-    success.content = { 'application/json': mediaType };
+  } else {
+    const successCode = entry.method === 'POST' ? '201' : '200';
+    const successSchema = ctx.convert(entry.responseSchema);
+    const success = { description: 'Successful response' };
+    if (successSchema) {
+      const mediaType = { schema: successSchema };
+      if (entry.examples && (entry.examples.response || entry.examples.success)) {
+        attachExamplesToMediaType(mediaType, entry.examples.response || entry.examples.success);
+      }
+      success.content = { 'application/json': mediaType };
+    }
+    responses[successCode] = success;
   }
-  responses[successCode] = success;
 
   if (Array.isArray(entry.errors)) {
     for (const err of entry.errors) {
