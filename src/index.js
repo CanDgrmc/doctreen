@@ -27,11 +27,11 @@
  *
  * @typedef {{ enabled?: boolean, sampleRate?: number, maxSamples?: number, webhook?: string, onDrift?: Function, store?: { record: Function, report: Function, reset: Function }, logLevel?: 'warn'|'silent', allowReset?: boolean, resetToken?: string }} DriftConfig
  *
- * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean|{ enabled?: boolean, writeback?: boolean, response?: 'off'|'warn'|'throw'|boolean }, openapi?: OpenApiConfig, headHtml?: string, drift?: DriftConfig|boolean }} UserConfig
+ * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean|{ enabled?: boolean, writeback?: boolean, response?: 'off'|'warn'|'throw'|boolean }, defaultErrors?: Record<number, string | { description?: string|null, schema?: any }>, openapi?: OpenApiConfig, headHtml?: string, drift?: DriftConfig|boolean }} UserConfig
  */
 
 /**
- * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: { enabled: boolean, writeback: boolean, response: 'off'|'warn'|'throw' }, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string, allowReset: boolean, resetToken: string|null } }} NormalizedConfig
+ * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: { enabled: boolean, writeback: boolean, response: 'off'|'warn'|'throw' }, defaultErrors: ErrorEntry[]|null, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string, allowReset: boolean, resetToken: string|null } }} NormalizedConfig
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -237,6 +237,10 @@ function normalizeConfig(userConfig = {}) {
     flowsPath: userConfig.flowsPath || null,
 
     validate: normalizeValidate(userConfig.validate),
+
+    // Config-level default error responses (v1.15), merged into every route's
+    // own errors (route wins per status) by the OpenAPI export and docs UI.
+    defaultErrors: require('./internal/errors').normalizeErrorMap(userConfig.defaultErrors),
 
     openapi: normalizeOpenApiConfig(userConfig.openapi),
 

@@ -25,7 +25,29 @@
  */
 
 const { _getNamedSchemas } = require('../index');
-const { getSchemaName } = require('../internal/named-schema');
+const { getSchemaName, setSchemaName } = require('../internal/named-schema');
+const { applyDefaultErrors } = require('../internal/errors');
+
+// Standard validation-error envelope (v1.15) — the shape `buildErrorBody`
+// produces for a 422. Tagged as a named schema so it dedupes into
+// `components.schemas.DoctreenValidationError` and codegen emits a type.
+const VALIDATION_ERROR_NODE = setSchemaName({
+  type: 'object',
+  properties: {
+    error: { type: 'string' },
+    issues: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          message: { type: 'string' },
+          code: { type: 'string' },
+        },
+      },
+    },
+  },
+}, 'DoctreenValidationError');
 
 // ─── SchemaNode → OpenAPI Schema Object ─────────────────────────────────────
 
@@ -438,6 +460,18 @@ function buildResponses(entry, ctx) {
       responses[code] = r;
     }
   }
+
+  // Standard validation-error envelope (v1.15). Routes that declared Zod
+  // validators can return the 422 `{ error, issues[] }` body — document it as a
+  // named `DoctreenValidationError` component (so codegen emits the type),
+  // unless the route already declares its own 422.
+  if (entry.requestValidators && !responses['422']) {
+    responses['422'] = {
+      description: 'Validation failed',
+      content: { 'application/json': { schema: ctx.convert(VALIDATION_ERROR_NODE) } },
+    };
+  }
+
   return responses;
 }
 
@@ -559,12 +593,15 @@ function buildOpenApiDocument(routes, config) {
 
   const ctx = createSchemaContext();
 
+  // Merge config-level default errors into each route (route wins per status).
+  const routeList = applyDefaultErrors(routes || [], cfg.defaultErrors);
+
   /** @type {Record<string, Record<string, object>>} */
   const paths = {};
   /** Tags actually used by operations (used to fill in defaults below). */
   const usedTags = new Set();
 
-  for (const entry of routes || []) {
+  for (const entry of routeList) {
     if (!entry || !entry.path || !entry.method) continue;
     if (cfg.docsPath && (entry.path === cfg.docsPath || entry.path.indexOf(cfg.docsPath + '/') === 0)) continue;
 

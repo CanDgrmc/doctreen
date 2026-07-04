@@ -245,6 +245,21 @@ export interface UserConfig {
    */
   validate?: boolean | { enabled?: boolean; writeback?: boolean; response?: 'off' | 'warn' | 'throw' | boolean };
 
+  /**
+   * Default error responses applied to every route (v1.15), keyed by HTTP
+   * status. Merged into each route's own `errors` — the route's own entry wins
+   * on a status conflict. Kills the boilerplate of repeating `401`/`403`/`422`
+   * on every `defineRoute`. Same shape as a route's `errors`.
+   *
+   * @example
+   * defaultErrors: {
+   *   401: 'Authentication required',
+   *   403: 'Forbidden',
+   *   422: { description: 'Validation failed', schema: s.object({ error: s.string() }) },
+   * }
+   */
+  defaultErrors?: Record<number, string | { description?: string | null; schema?: SchemaNode | unknown }>;
+
   /** OpenAPI-specific options applied to `<docsPath>/openapi.json` (v1.7+). */
   openapi?: OpenApiConfig;
 
@@ -433,6 +448,7 @@ export interface NormalizedConfig {
   flows: FlowDefinition[] | null;
   flowsPath: string | null;
   validate: { enabled: boolean; writeback: boolean; response: 'off' | 'warn' | 'throw' };
+  defaultErrors: ErrorEntry[] | null;
   openapi: {
     servers: OpenApiServer[];
     securitySchemes: Record<string, unknown> | null;
