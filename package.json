@@ -1,6 +1,6 @@
 {
   "name": "doctreen",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "description": "Code-first API docs + OpenAPI 3.1 export + integration tests + runtime validation for Node.js. Define routes once with Zod and get docs, runnable flows, 422-on-invalid-request validation, OpenAPI 3.1 export, and schema drift detection for Express, Fastify, Hono, Koa, and NestJS.",
   "main": "src/index.js",
   "types": "src/index.d.ts",

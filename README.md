@@ -5,7 +5,7 @@
 [**Docs →**](https://doctreen.dev) &nbsp;·&nbsp; [**Live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](https://doctreen.dev/docs/roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.14.1** &nbsp;—&nbsp; **`codegen` no longer emits invalid TypeScript for nullable objects.** A nullable object schema — OpenAPI 3.1 `type: ["object", "null"]` or 3.0 `nullable: true` — renders as `{ … } | null`, which starts with `{` but is not a bare object… **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.14.1)**
+> **What's new in v1.15.0** &nbsp;—&nbsp; **Path-parameter schemas + validation** — `defineRoute` now accepts `request: { params }`, so `:id` and friends are validated by the same Zod schema that documents them, with a structured 422 on mismatch. **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.15.0)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder) and you get an interactive docs UI, OpenAPI 3.1 export, runnable integration flows, and 422-on-invalid-request validation — for **Express, Fastify, Hono, Koa, and NestJS**. No router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
@@ -123,9 +123,9 @@ Each adapter also has a fully-typed TS variant (`npm run example:ts`, `:fastify:
 
 ## Roadmap
 
-**Shipped:** runtime validation (v1.6) · OpenAPI 3.1 export (v1.7) · security schemes + hidden routes (v1.8) · `headHtml` (v1.9) · schema drift detection (v1.10) · `$ref` dedup, tags, callbacks/webhooks, examples, `lint openapi` (v1.11) · spec-driven mock server (v1.12) · typed TS codegen + fetch client (v1.13) · schema enums/nullable/defaults (v1.14)
+**Shipped:** runtime validation (v1.6) · OpenAPI 3.1 export (v1.7) · security schemes + hidden routes (v1.8) · `headHtml` (v1.9) · schema drift detection (v1.10) · `$ref` dedup, tags, callbacks/webhooks, examples, `lint openapi` (v1.11) · spec-driven mock server (v1.12) · typed TS codegen + fetch client (v1.13) · schema enums/nullable/defaults (v1.14) · validation completeness — path-param schemas, coerce/default write-back, response assertions, status-keyed responses, `defaultErrors`, Zod `$ref` codegen, offline `emit-openapi` (v1.15)
 
-**Next up:** validation completeness — path-param schemas, coerce/default write-back, response assertions, named Zod `$ref` codegen (v1.15) · AI-native endpoints (`/llm.txt`, MCP server) · contract testing & spec diff · `doctreen init` CLI
+**Next up:** AI-native endpoints (`/llm.txt`, MCP server) · contract testing & spec diff · `doctreen init` CLI
 
 Full roadmap with rationale: **[doctreen.dev/docs/roadmap](https://doctreen.dev/docs/roadmap)**
 
