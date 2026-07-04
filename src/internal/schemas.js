@@ -37,16 +37,19 @@ function normalizeRouteSchemas(schemas) {
   const out = Object.assign({}, schemas);
 
   // Keep references to original Zod schemas — needed for runtime validation.
-  let originalBody  = null;
-  let originalQuery = null;
+  let originalBody   = null;
+  let originalQuery  = null;
+  let originalParams = null;
 
   if (out.request && typeof out.request === 'object' && !isZodSchema(out.request)) {
-    if (isZodSchema(out.request.body))  originalBody  = out.request.body;
-    if (isZodSchema(out.request.query)) originalQuery = out.request.query;
+    if (isZodSchema(out.request.body))   originalBody   = out.request.body;
+    if (isZodSchema(out.request.query))  originalQuery  = out.request.query;
+    if (isZodSchema(out.request.params)) originalParams = out.request.params;
 
     const req = {};
-    if ('body' in out.request)  req.body  = convertSchema(out.request.body);
-    if ('query' in out.request) req.query = convertSchema(out.request.query);
+    if ('body' in out.request)   req.body   = convertSchema(out.request.body);
+    if ('query' in out.request)  req.query  = convertSchema(out.request.query);
+    if ('params' in out.request) req.params = convertSchema(out.request.params);
     out.request = req;
   } else if (isZodSchema(out.request)) {
     originalBody = out.request;
@@ -72,8 +75,8 @@ function normalizeRouteSchemas(schemas) {
 
   // Attach validators only when at least one Zod schema was supplied; absence
   // of this property means "nothing to validate against".
-  if (originalBody || originalQuery) {
-    out.validators = { body: originalBody, query: originalQuery };
+  if (originalBody || originalQuery || originalParams) {
+    out.validators = { body: originalBody, query: originalQuery, params: originalParams };
   }
 
   // OpenAPI 3.1 callbacks (v1.11+). Each callback entry can carry its own

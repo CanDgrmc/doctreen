@@ -32,7 +32,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
-const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback } = require('../internal/validate');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
@@ -272,11 +272,18 @@ function wrapRouteHandlers(handlerStack, entry, config) {
         shouldValidate(config && config.validate, currentEntry.validateOverride)
       ) {
         return validateRequest(currentEntry.requestValidators, {
-          body:  /** @type {any} */ (req).body,
-          query: /** @type {any} */ (req).query,
+          body:   /** @type {any} */ (req).body,
+          query:  /** @type {any} */ (req).query,
+          params: /** @type {any} */ (req).params,
         }).then(function (result) {
           if (!result.ok) {
             return /** @type {any} */ (res).status(422).json(buildErrorBody(result.issues));
+          }
+          // v1.15 write-back: push coerced/defaulted values onto the request so
+          // the handler reads the parsed values, not the raw ones. Opt-in via
+          // `validate: { writeback: true }`.
+          if (shouldWriteback(config && config.validate)) {
+            applyWriteback(req, result.data);
           }
           return runOriginalWithCapture();
         }).catch(next);

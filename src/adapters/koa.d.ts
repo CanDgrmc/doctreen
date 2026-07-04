@@ -105,7 +105,7 @@ export interface RouteSchemas {
    * Accepts a SchemaNode (from the `s` builder) or a Zod schema — both work
    * interchangeably. Zod schemas are converted to SchemaNode automatically.
    */
-  request?: { body?: SchemaInput | null; query?: SchemaInput | null } | null;
+  request?: { body?: SchemaInput | null; query?: SchemaInput | null; params?: SchemaInput | null } | null;
   /** Response payload schema. Accepts SchemaNode or Zod schema. */
   response?: SchemaInput | null;
   /**

@@ -22,10 +22,11 @@ export interface NestRouteSchemas {
    */
   headers?: Record<string, string>;
 
-  /** Request body and/or query parameter schemas. Accept SchemaNode or Zod schemas. */
+  /** Request body, query, and/or path-param schemas. Accept SchemaNode or Zod schemas. */
   request?: {
     body?: SchemaInput | null;
     query?: SchemaInput | null;
+    params?: SchemaInput | null;
   } | null;
 
   /** Response payload schema. Accepts a SchemaNode or a Zod schema. */
@@ -159,6 +160,7 @@ export declare function DocHeaders(headers: Record<string, string>): MethodDecor
 export declare function DocRequest(request: {
   body?: SchemaInput | null;
   query?: SchemaInput | null;
+  params?: SchemaInput | null;
 }): MethodDecorator;
 
 /**

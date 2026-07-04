@@ -14,7 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback } = require('../internal/validate');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -255,9 +255,14 @@ function fastifyAdapter(fastify, userConfig) {
     if (!entry || !entry.requestValidators) return;
     if (!shouldValidate(config.validate, entry.validateOverride)) return;
 
-    const result = await validateRequest(entry.requestValidators, { body: req.body, query: req.query });
+    const result = await validateRequest(entry.requestValidators, { body: req.body, query: req.query, params: req.params });
     if (!result.ok) {
       reply.code(422).send(buildErrorBody(result.issues));
+      return;
+    }
+    // v1.15 write-back — opt-in via `validate: { writeback: true }`.
+    if (shouldWriteback(config.validate)) {
+      applyWriteback(req, result.data);
     }
   });
 

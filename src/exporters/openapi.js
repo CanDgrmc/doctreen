@@ -287,8 +287,22 @@ function headerParameters(headers, stripAuth) {
 
 function buildParameters(entry, stripAuthHeaders, ctx) {
   const out = [];
+  // Path params (v1.15): if the route declared a `request.params` schema, type
+  // each path parameter from it; otherwise fall back to plain string. Path
+  // params are always `required` in OpenAPI regardless of the schema.
+  const paramsSchema = entry.requestSchema && entry.requestSchema.params;
+  const paramProps =
+    paramsSchema && paramsSchema.type === 'object' && paramsSchema.properties
+      ? paramsSchema.properties
+      : null;
   for (const param of entry.params || []) {
-    out.push({ name: param, in: 'path', required: true, schema: { type: 'string' } });
+    const node = paramProps ? paramProps[param] : null;
+    out.push({
+      name: param,
+      in: 'path',
+      required: true,
+      schema: node ? (ctx.convert(node) || { type: 'string' }) : { type: 'string' },
+    });
   }
   if (entry.requestSchema) {
     const q = queryParameters(entry.requestSchema.query, ctx);

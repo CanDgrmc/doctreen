@@ -27,11 +27,11 @@
  *
  * @typedef {{ enabled?: boolean, sampleRate?: number, maxSamples?: number, webhook?: string, onDrift?: Function, store?: { record: Function, report: Function, reset: Function }, logLevel?: 'warn'|'silent', allowReset?: boolean, resetToken?: string }} DriftConfig
  *
- * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean, openapi?: OpenApiConfig, headHtml?: string, drift?: DriftConfig|boolean }} UserConfig
+ * @typedef {{ docsPath?: string, enabled?: boolean, meta?: { title?: string, version?: string, description?: string }, exclude?: Array<string|RegExp>, liveReload?: boolean, groups?: Record<string, { description?: string }>, flows?: Array<any>, flowsPath?: string, validate?: boolean|{ enabled?: boolean, writeback?: boolean }, openapi?: OpenApiConfig, headHtml?: string, drift?: DriftConfig|boolean }} UserConfig
  */
 
 /**
- * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: boolean, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string, allowReset: boolean, resetToken: string|null } }} NormalizedConfig
+ * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: { enabled: boolean, writeback: boolean }, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string, allowReset: boolean, resetToken: string|null } }} NormalizedConfig
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,7 +236,7 @@ function normalizeConfig(userConfig = {}) {
     flows: Array.isArray(userConfig.flows) ? userConfig.flows : null,
     flowsPath: userConfig.flowsPath || null,
 
-    validate: Boolean(userConfig.validate),
+    validate: normalizeValidate(userConfig.validate),
 
     openapi: normalizeOpenApiConfig(userConfig.openapi),
 
@@ -287,6 +287,29 @@ function normalizeDriftConfig(input) {
     allowReset: Boolean(input.allowReset),
     resetToken: typeof input.resetToken === 'string' && input.resetToken.length > 0 ? input.resetToken : null,
   };
+}
+
+/**
+ * Normalise the `validate` config into the canonical object form
+ * `{ enabled, writeback }`.
+ *
+ * Accepts:
+ *   - `undefined` / `false` → `{ enabled: false, writeback: false }`
+ *   - `true`               → `{ enabled: true,  writeback: false }` (legacy: validate, don't mutate)
+ *   - `{ enabled?, writeback? }` → object form; providing an object implies
+ *     `enabled` unless it is set to `false` explicitly.
+ *
+ * @param {boolean|{enabled?:boolean,writeback?:boolean}|undefined} input
+ * @returns {{ enabled: boolean, writeback: boolean }}
+ */
+function normalizeValidate(input) {
+  if (input && typeof input === 'object') {
+    return {
+      enabled: input.enabled !== false,
+      writeback: Boolean(input.writeback),
+    };
+  }
+  return { enabled: Boolean(input), writeback: false };
 }
 
 /**

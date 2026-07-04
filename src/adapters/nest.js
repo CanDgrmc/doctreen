@@ -5,7 +5,7 @@
 const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = require('../index');
 const { serveDocsUI } = require('../ui/index');
 const { convertSchema, normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback } = require('../internal/validate');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -78,15 +78,17 @@ function seedEntryFromSchema(entry, docSchema) {
 
   if (docSchema.request) {
     entry.requestSchema = {
-      body: convertSchema(docSchema.request.body) || null,
-      query: convertSchema(docSchema.request.query) || null,
+      body:   convertSchema(docSchema.request.body)   || null,
+      query:  convertSchema(docSchema.request.query)  || null,
+      params: convertSchema(docSchema.request.params) || null,
     };
     entry.requestSchemaDeclared = true;
     // Preserve original Zod schemas (when present) for v1.6+ runtime validation.
-    const validatorBody  = isZodInstance(docSchema.request.body)  ? docSchema.request.body  : null;
-    const validatorQuery = isZodInstance(docSchema.request.query) ? docSchema.request.query : null;
-    if (validatorBody || validatorQuery) {
-      entry.requestValidators = { body: validatorBody, query: validatorQuery };
+    const validatorBody   = isZodInstance(docSchema.request.body)   ? docSchema.request.body   : null;
+    const validatorQuery  = isZodInstance(docSchema.request.query)  ? docSchema.request.query  : null;
+    const validatorParams = isZodInstance(docSchema.request.params) ? docSchema.request.params : null;
+    if (validatorBody || validatorQuery || validatorParams) {
+      entry.requestValidators = { body: validatorBody, query: validatorQuery, params: validatorParams };
     }
   }
 
@@ -543,16 +545,21 @@ function nestAdapter(app, userConfig) {
         if (!docSchema || !docSchema.request) return true;
 
         const validators = {
-          body:  isZodInstance(docSchema.request.body)  ? docSchema.request.body  : null,
-          query: isZodInstance(docSchema.request.query) ? docSchema.request.query : null,
+          body:   isZodInstance(docSchema.request.body)   ? docSchema.request.body   : null,
+          query:  isZodInstance(docSchema.request.query)  ? docSchema.request.query  : null,
+          params: isZodInstance(docSchema.request.params) ? docSchema.request.params : null,
         };
-        if (!validators.body && !validators.query) return true;
+        if (!validators.body && !validators.query && !validators.params) return true;
 
         const perRoute = docSchema.validate;
         if (!shouldValidate(config.validate, perRoute)) return true;
 
-        const result = await validateRequest(validators, { body: req.body, query: req.query });
-        if (result.ok) return true;
+        const result = await validateRequest(validators, { body: req.body, query: req.query, params: req.params });
+        if (result.ok) {
+          // v1.15 write-back — opt-in via `validate: { writeback: true }`.
+          if (shouldWriteback(config.validate)) applyWriteback(req, result.data);
+          return true;
+        }
 
         const body = buildErrorBody(result.issues);
         if (HttpException) throw new HttpException(body, 422);
