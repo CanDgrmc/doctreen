@@ -782,6 +782,8 @@ function renderFlowSections(flows) {
 function serveDocsUI(routes, config, options) {
   options = options || {};
   const { meta }    = config;
+  // Merge config-level default errors into each route (route wins per status).
+  routes = require('../internal/errors').applyDefaultErrors(routes, config.defaultErrors);
   const generatedAt = new Date().toUTCString();
   const totalRoutes = routes.length;
   const liveCount   = routes.filter((r) => r.requestSchema !== null || r.responseSchema !== null).length;

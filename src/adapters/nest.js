@@ -4,8 +4,8 @@
 
 const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = require('../index');
 const { serveDocsUI } = require('../ui/index');
-const { convertSchema, normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { convertSchema, normalizeRouteSchemas, normalizeResponseField } = require('../internal/schemas');
+const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, reportResponseIssues } = require('../internal/validate');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -78,20 +78,26 @@ function seedEntryFromSchema(entry, docSchema) {
 
   if (docSchema.request) {
     entry.requestSchema = {
-      body: convertSchema(docSchema.request.body) || null,
-      query: convertSchema(docSchema.request.query) || null,
+      body:   convertSchema(docSchema.request.body)   || null,
+      query:  convertSchema(docSchema.request.query)  || null,
+      params: convertSchema(docSchema.request.params) || null,
     };
     entry.requestSchemaDeclared = true;
     // Preserve original Zod schemas (when present) for v1.6+ runtime validation.
-    const validatorBody  = isZodInstance(docSchema.request.body)  ? docSchema.request.body  : null;
-    const validatorQuery = isZodInstance(docSchema.request.query) ? docSchema.request.query : null;
-    if (validatorBody || validatorQuery) {
-      entry.requestValidators = { body: validatorBody, query: validatorQuery };
+    const validatorBody   = isZodInstance(docSchema.request.body)   ? docSchema.request.body   : null;
+    const validatorQuery  = isZodInstance(docSchema.request.query)  ? docSchema.request.query  : null;
+    const validatorParams = isZodInstance(docSchema.request.params) ? docSchema.request.params : null;
+    if (validatorBody || validatorQuery || validatorParams) {
+      entry.requestValidators = { body: validatorBody, query: validatorQuery, params: validatorParams };
     }
   }
 
   if (docSchema.response != null) {
-    entry.responseSchema = convertSchema(docSchema.response);
+    const r = normalizeResponseField(docSchema.response);
+    entry.responseSchema = r.response;
+    if (r.responses)          entry.responses          = r.responses;
+    if (r.responseValidators) entry.responseValidators = r.responseValidators;
+    if (r.responseValidator)  entry.responseValidator  = r.responseValidator;
   }
 
   if (docSchema.errors) {
@@ -531,7 +537,7 @@ function nestAdapter(app, userConfig) {
   // and the controller, so `req.body` is reliably parsed by the time we read
   // it. Going via the guard system also means our 422 response is shaped by
   // NestJS's HttpException pipeline (compatible with global filters).
-  if (config.validate && typeof app.useGlobalGuards === 'function') {
+  if (config.validate.enabled && typeof app.useGlobalGuards === 'function') {
     let HttpException = null;
     try { HttpException = require('@nestjs/common').HttpException; } catch (_) { /* no-op */ }
 
@@ -543,16 +549,21 @@ function nestAdapter(app, userConfig) {
         if (!docSchema || !docSchema.request) return true;
 
         const validators = {
-          body:  isZodInstance(docSchema.request.body)  ? docSchema.request.body  : null,
-          query: isZodInstance(docSchema.request.query) ? docSchema.request.query : null,
+          body:   isZodInstance(docSchema.request.body)   ? docSchema.request.body   : null,
+          query:  isZodInstance(docSchema.request.query)  ? docSchema.request.query  : null,
+          params: isZodInstance(docSchema.request.params) ? docSchema.request.params : null,
         };
-        if (!validators.body && !validators.query) return true;
+        if (!validators.body && !validators.query && !validators.params) return true;
 
         const perRoute = docSchema.validate;
         if (!shouldValidate(config.validate, perRoute)) return true;
 
-        const result = await validateRequest(validators, { body: req.body, query: req.query });
-        if (result.ok) return true;
+        const result = await validateRequest(validators, { body: req.body, query: req.query, params: req.params });
+        if (result.ok) {
+          // v1.15 write-back — opt-in via `validate: { writeback: true }`.
+          if (shouldWriteback(config.validate)) applyWriteback(req, result.data);
+          return true;
+        }
 
         const body = buildErrorBody(result.issues);
         if (HttpException) throw new HttpException(body, 422);
@@ -566,6 +577,47 @@ function nestAdapter(app, userConfig) {
       },
     };
     app.useGlobalGuards(guard);
+  }
+
+  // ── Response assertion (v1.15 dev-mode) ───────────────────────────────────
+  // Guards can't see the response, so a global interceptor maps over the
+  // handler's return value and asserts it against the declared Zod response
+  // schema. 'warn' logs; 'throw' errors the stream → NestJS 500 in dev.
+  if (config.validate.response !== 'off' && typeof app.useGlobalInterceptors === 'function') {
+    let mapOp = null;
+    try { mapOp = require('rxjs/operators').map; } catch (_) { /* no-op */ }
+    if (!mapOp) { try { mapOp = require('rxjs').map; } catch (_) { /* no-op */ } }
+
+    if (mapOp) {
+      const rMode = config.validate.response;
+      const interceptor = {
+        intercept(context, next) {
+          const handler = context.getHandler();
+          const docSchema = handler ? Reflect.getMetadata(DOC_ROUTE_METADATA, handler) : null;
+          if (!docSchema || docSchema.response == null) return next.handle();
+          // Normalise single-or-status-keyed response into validators.
+          const norm = normalizeResponseField(docSchema.response);
+          const faux = { responseValidators: norm.responseValidators, responseValidator: norm.responseValidator };
+          if (!faux.responseValidators && !faux.responseValidator) return next.handle();
+          const http = context.switchToHttp();
+          const req = http.getRequest();
+          const res = http.getResponse();
+          const label = ((req && req.method) || 'GET') + ' ' +
+            ((req && ((req.route && req.route.path) || req.url)) || '');
+          return next.handle().pipe(mapOp(function (data) {
+            const status = (res && res.statusCode) ||
+              ((req && req.method === 'POST') ? 201 : 200);
+            const schema = resolveResponseValidator(faux, status);
+            if (schema) {
+              const rv = validateResponse(schema, data);
+              if (!rv.ok) reportResponseIssues(rMode, label, rv.issues);
+            }
+            return data;
+          }));
+        },
+      };
+      app.useGlobalInterceptors(interceptor);
+    }
   }
 }
 
@@ -588,8 +640,25 @@ function defineRoute(handler, schemas) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Build the OpenAPI document for a NestJS app without listening (v1.15) — runs
+ * container discovery in-process so build-time tooling can emit a static
+ * `openapi.json`. The app must be created (`await NestFactory.create(...)`)
+ * before calling; `app.listen()` is not required.
+ *
+ * @param {object} app  - INestApplication
+ * @param {import('../index').UserConfig} [userConfig]
+ * @returns {object} OpenAPI 3.1 document
+ */
+function getOpenApiDocument(app, userConfig) {
+  const config = normalizeConfig(userConfig || {});
+  const registry = discoverRoutes(app, config);
+  return buildOpenApiDocument(registry.getVisible(), config);
+}
+
 module.exports = {
   nestAdapter,
+  getOpenApiDocument,
   DocRoute,
   DocDescription,
   DocHeaders,

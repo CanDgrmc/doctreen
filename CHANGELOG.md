@@ -4,6 +4,53 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] — 2026-07-04
+
+Validation, completed — this release closes the gap between what a route
+*documents* and what it *enforces*, and fixes the codegen type-safety holes
+that pushed consumers back to hand-written types.
+
+### Added
+
+- **Path-parameter schemas + validation** — `defineRoute` now accepts
+  `request: { params }`, so `:id` and friends are validated by the same Zod
+  schema that documents them, with a structured 422 on mismatch. Works across
+  Express, Fastify, Hono, Koa, and NestJS — no more hand-rolled `requireUuid`
+  helpers repeated on every route.
+- **Request write-back.** Opt in with `validate: { writeback: true }` and the
+  *parsed* payload — Zod coercions and `.default()`s applied — is written back
+  onto `req.body` / `req.query` / `req.params`, so the handler reads coerced
+  values instead of re-parsing them. (Koa and Hono expose coerced path params
+  via `ctx.state.doctreenValidated` / `c.get('doctreenValidated')`.)
+- **Dev-mode response assertion.** `validate: { response: 'warn' | 'throw' }`
+  checks the handler's response against the declared Zod `response` schema —
+  `'warn'` logs a mismatch and passes through, `'throw'` surfaces a 500 in
+  development. Never coerces the response.
+- **Status-keyed responses.** `response: { 201: schema, 200: schema }` documents
+  each status with its own schema and drives the OpenAPI export; the plain
+  `response: schema` form still means `200`.
+- **`defaultErrors` config.** Declare shared error responses (401 / 403 / 422 …)
+  once — they merge into every route, with the route's own `errors` winning on a
+  status conflict.
+- **Standard `DoctreenValidationError` envelope.** Validated routes document
+  their 422 `{ error, issues[] }` body as a named component, so codegen emits a
+  `DoctreenValidationError` type and clients stop guessing the error shape.
+- **Offline OpenAPI emit.** `getOpenApiDocument(app)` (on every adapter) and the
+  new `doctreen emit-openapi` CLI build a static `openapi.json` without starting
+  a server, so codegen and CI can run fully offline.
+
+### Fixed
+
+- **`defineSchema` now works with Zod schemas.** Named schemas were matched by
+  object identity, which Zod→SchemaNode conversion breaks — so Zod-defined named
+  schemas fell through to anonymous `Schema1` / `Schema2` types in codegen. They
+  now emit `$ref: '#/components/schemas/<name>'` and codegen produces
+  `interface User`, at the top level, nested, and inside arrays.
+- **Deep schemas no longer collapse to `unknown`.** The Zod conversion depth cap
+  was raised from 5 to 12, so deep-but-non-recursive trees (menu → categories →
+  items → variants → options) keep their leaf types. Recursion is best expressed
+  with `defineSchema`, which now emits a terminating `$ref`.
+
 ## [1.14.1] — 2026-07-02
 
 ### Fixed

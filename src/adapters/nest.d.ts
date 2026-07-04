@@ -22,14 +22,15 @@ export interface NestRouteSchemas {
    */
   headers?: Record<string, string>;
 
-  /** Request body and/or query parameter schemas. Accept SchemaNode or Zod schemas. */
+  /** Request body, query, and/or path-param schemas. Accept SchemaNode or Zod schemas. */
   request?: {
     body?: SchemaInput | null;
     query?: SchemaInput | null;
+    params?: SchemaInput | null;
   } | null;
 
-  /** Response payload schema. Accepts a SchemaNode or a Zod schema. */
-  response?: SchemaInput | null;
+  /** Response payload schema. Accepts a SchemaNode, a Zod schema, or a status-keyed map (`{ 201: schema }`, v1.15). */
+  response?: SchemaInput | Record<number, SchemaInput> | null;
 
   /**
    * Documented error responses keyed by HTTP status code.
@@ -92,6 +93,9 @@ export interface NestApplicationLike {
  * ```
  */
 export declare function nestAdapter(app: NestApplicationLike, userConfig?: UserConfig): void;
+
+/** Build the OpenAPI 3.1 document from a created INestApplication offline (no listen). */
+export declare function getOpenApiDocument(app: NestApplicationLike, userConfig?: UserConfig): object;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Decorators
@@ -159,6 +163,7 @@ export declare function DocHeaders(headers: Record<string, string>): MethodDecor
 export declare function DocRequest(request: {
   body?: SchemaInput | null;
   query?: SchemaInput | null;
+  params?: SchemaInput | null;
 }): MethodDecorator;
 
 /**

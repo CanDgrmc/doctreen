@@ -39,6 +39,9 @@ export declare function expressAdapter(
   userConfig?: UserConfig
 ): RequestHandler;
 
+/** Build the OpenAPI 3.1 document from an Express app offline (no server). */
+export declare function getOpenApiDocument(app: ExpressLike, userConfig?: UserConfig): object;
+
 /**
  * Schema definitions passed to `defineRoute`.
  */
@@ -56,9 +59,9 @@ export interface RouteSchemas {
    * Accepts a SchemaNode (from the `s` builder) or a Zod schema — both work
    * interchangeably. Zod schemas are converted to SchemaNode automatically.
    */
-  request?: { body?: SchemaInput | null; query?: SchemaInput | null } | null;
-  /** Response payload schema. Accepts SchemaNode or Zod schema. */
-  response?: SchemaInput | null;
+  request?: { body?: SchemaInput | null; query?: SchemaInput | null; params?: SchemaInput | null } | null;
+  /** Response payload schema. Accepts a SchemaNode, a Zod schema, or a status-keyed map (`{ 201: schema }`, v1.15). */
+  response?: SchemaInput | Record<number, SchemaInput> | null;
   /**
    * Documented error responses keyed by HTTP status code.
    * Values can be a plain description string or an object with an optional

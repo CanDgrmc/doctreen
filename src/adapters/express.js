@@ -32,7 +32,7 @@ const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
-const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
@@ -221,6 +221,15 @@ function wrapRouteHandlers(handlerStack, entry, config) {
       if (predef.validators) {
         entry.requestValidators = predef.validators;
       }
+      if (predef.responseValidator) {
+        entry.responseValidator = predef.responseValidator;
+      }
+      if (predef.responses) {
+        entry.responses = predef.responses;
+      }
+      if (predef.responseValidators) {
+        entry.responseValidators = predef.responseValidators;
+      }
       if (predef.validate !== undefined) {
         entry.validateOverride = predef.validate;
       }
@@ -272,11 +281,18 @@ function wrapRouteHandlers(handlerStack, entry, config) {
         shouldValidate(config && config.validate, currentEntry.validateOverride)
       ) {
         return validateRequest(currentEntry.requestValidators, {
-          body:  /** @type {any} */ (req).body,
-          query: /** @type {any} */ (req).query,
+          body:   /** @type {any} */ (req).body,
+          query:  /** @type {any} */ (req).query,
+          params: /** @type {any} */ (req).params,
         }).then(function (result) {
           if (!result.ok) {
             return /** @type {any} */ (res).status(422).json(buildErrorBody(result.issues));
+          }
+          // v1.15 write-back: push coerced/defaulted values onto the request so
+          // the handler reads the parsed values, not the raw ones. Opt-in via
+          // `validate: { writeback: true }`.
+          if (shouldWriteback(config && config.validate)) {
+            applyWriteback(req, result.data);
           }
           return runOriginalWithCapture();
         }).catch(next);
@@ -329,6 +345,21 @@ function wrapRouteHandlers(handlerStack, entry, config) {
             // ── Capture response schema ─────────────────────────────────────
             if (!currentEntry.responseSchema) {
               currentEntry.responseSchema = inferSchema(responseBody);
+            }
+
+            // ── Response assertion (v1.15 dev-mode) ─────────────────────────
+            const rMode = responseMode(config && config.validate);
+            if (rMode !== 'off') {
+              const rSchema = resolveResponseValidator(currentEntry, /** @type {any} */ (res).statusCode);
+              if (rSchema) {
+                const rv = validateResponse(rSchema, responseBody);
+                if (!rv.ok) {
+                  // Restore json before surfacing so a thrown error (500 in dev)
+                  // or a subsequent send doesn't re-enter this wrapper.
+                  /** @type {any} */ (res).json = originalJson;
+                  reportResponseIssues(rMode, currentEntry.method + ' ' + currentEntry.path, rv.issues);
+                }
+              }
             }
 
             // Restore immediately so stacking wrappers can't occur if
@@ -419,6 +450,25 @@ function introspectExpressApp(app, registry, config) {
   }
 
   walkStack(router.stack, '', registry, config);
+}
+
+/**
+ * getOpenApiDocument
+ *
+ * Build the OpenAPI document for an Express app **without** starting a server
+ * (v1.15). Introspects the router stack in-process and returns the doc object,
+ * so build-time tooling (`doctreen emit-openapi`, CI) can produce a static
+ * `openapi.json` offline. Routes must be registered on `app` before calling.
+ *
+ * @param {object} app
+ * @param {UserConfig} [userConfig]
+ * @returns {object} OpenAPI 3.1 document
+ */
+function getOpenApiDocument(app, userConfig) {
+  const config = normalizeConfig(userConfig || {});
+  const registry = new RouteRegistry();
+  introspectExpressApp(app, registry, config);
+  return buildOpenApiDocument(registry.getVisible(), config);
 }
 
 function readJsonBody(req) {
@@ -591,4 +641,4 @@ function defineRoute(handler, schemas) {
   return handler;
 }
 
-module.exports = { expressAdapter, defineRoute, defineSchema, s };
+module.exports = { expressAdapter, getOpenApiDocument, defineRoute, defineSchema, s };

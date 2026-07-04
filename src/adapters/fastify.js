@@ -14,7 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, buildErrorBody, shouldValidate } = require('../internal/validate');
+const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -122,6 +122,9 @@ function seedEntryFromHandler(entry, handler, nativeSchema) {
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
     if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
+    if (predef.responseValidator)                                        entry.responseValidator = predef.responseValidator;
+    if (predef.responses)                                                entry.responses          = predef.responses;
+    if (predef.responseValidators)                                       entry.responseValidators = predef.responseValidators;
     if (predef.validate !== undefined)                                   entry.validateOverride  = predef.validate;
     if (predef.hidden === true)                                          entry.hidden            = true;
     if (predef.security !== undefined)                                   entry.security          = predef.security;
@@ -209,6 +212,10 @@ function fastifyAdapter(fastify, userConfig) {
   const config   = normalizeConfig(userConfig || {});
   const registry = new RouteRegistry();
 
+  // Expose the registry for offline OpenAPI emit (v1.15). Stashed before the
+  // enabled-gate so `getOpenApiDocument` can read it after `fastify.ready()`.
+  try { fastify.__doctreenRegistry = registry; } catch (_) { /* frozen */ }
+
   if (!config.enabled) return;
 
   // Schema drift pipeline (v1.10+). See express adapter for details.
@@ -255,10 +262,35 @@ function fastifyAdapter(fastify, userConfig) {
     if (!entry || !entry.requestValidators) return;
     if (!shouldValidate(config.validate, entry.validateOverride)) return;
 
-    const result = await validateRequest(entry.requestValidators, { body: req.body, query: req.query });
+    const result = await validateRequest(entry.requestValidators, { body: req.body, query: req.query, params: req.params });
     if (!result.ok) {
       reply.code(422).send(buildErrorBody(result.issues));
+      return;
     }
+    // v1.15 write-back — opt-in via `validate: { writeback: true }`.
+    if (shouldWriteback(config.validate)) {
+      applyWriteback(req, result.data);
+    }
+  });
+
+  // ── Response assertion (v1.15 dev-mode) ─────────────────────────────────
+  // preSerialization runs with the response *object* before it is serialised,
+  // so we can assert it against the declared Zod response schema. 'warn' logs
+  // and passes through; 'throw' bubbles a 500 in development.
+  fastify.addHook('preSerialization', async function (req, reply, payload) {
+    const rMode = responseMode(config.validate);
+    if (rMode === 'off') return payload;
+    const routeMethod = (req.method || '').toUpperCase();
+    const routePath   = (req.routeOptions && req.routeOptions.url) || req.routerPath || '';
+    if (!routePath) return payload;
+    const entry = registry.find(routeMethod, routePath);
+    if (!entry) return payload;
+    const rSchema = resolveResponseValidator(entry, reply.statusCode);
+    if (rSchema) {
+      const rv = validateResponse(rSchema, payload);
+      if (!rv.ok) reportResponseIssues(rMode, routeMethod + ' ' + routePath, rv.issues);
+    }
+    return payload;
   });
 
   // ── Schema drift detection (v1.10+) ─────────────────────────────────────
@@ -366,4 +398,26 @@ function defineRoute(handler, schemas) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-module.exports = { fastifyAdapter, defineRoute, defineSchema, s };
+/**
+ * Build the OpenAPI document for a Fastify app without listening (v1.15).
+ * Fastify captures routes via an `onRoute` hook during registration, so call
+ * `fastifyAdapter(fastify, …)` BEFORE your routes and `await fastify.ready()`
+ * before this. Lets build-time tooling emit a static `openapi.json` offline.
+ *
+ * @param {object} fastify
+ * @param {UserConfig} [userConfig]
+ * @returns {object} OpenAPI 3.1 document
+ */
+function getOpenApiDocument(fastify, userConfig) {
+  const config = normalizeConfig(userConfig || {});
+  const registry = fastify && fastify.__doctreenRegistry;
+  if (!registry) {
+    throw new Error(
+      '[doctreen] getOpenApiDocument: no registry found. Call fastifyAdapter(fastify) ' +
+      'with docs enabled and register routes (then `await fastify.ready()`) first.'
+    );
+  }
+  return buildOpenApiDocument(registry.getVisible(), config);
+}
+
+module.exports = { fastifyAdapter, getOpenApiDocument, defineRoute, defineSchema, s };

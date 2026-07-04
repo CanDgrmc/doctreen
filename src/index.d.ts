@@ -59,6 +59,8 @@ export interface RequestSchema {
   body: SchemaNode | null;
   /** Shape of req.query (null if no query params were observed) */
   query: SchemaNode | null;
+  /** Shape of req.params — path parameters (v1.15). null if not declared. */
+  params?: SchemaNode | null;
 }
 
 /**
@@ -101,7 +103,13 @@ export interface RouteEntry {
    * Original Zod schemas (v1.6+) captured by `normalizeRouteSchemas` for
    * runtime validation. `SchemaNode` versions live in `requestSchema`.
    */
-  requestValidators?: { body: unknown | null; query: unknown | null };
+  requestValidators?: { body: unknown | null; query: unknown | null; params?: unknown | null };
+  /** Original Zod response schema (v1.15) for dev-mode response assertion. */
+  responseValidator?: unknown | null;
+  /** Status-keyed response SchemaNodes (v1.15) when `response` is a `{ 201: … }` map. */
+  responses?: Record<string, SchemaNode | null>;
+  /** Status-keyed original Zod response validators (v1.15). */
+  responseValidators?: Record<string, unknown | null>;
   /** Per-route validation override (v1.6+). undefined → inherit adapter default. */
   validateOverride?: boolean;
   /** When true, this route is omitted from the docs UI and OpenAPI export (v1.8+). */
@@ -214,12 +222,43 @@ export interface UserConfig {
   flowsPath?: string;
 
   /**
-   * When `true`, requests are validated against the declared Zod schema
-   * before the handler executes. Invalid requests are rejected with a
-   * structured 422 response. Available on every adapter (v1.6+).
+   * Runtime request validation (v1.6+). When enabled, requests are validated
+   * against the declared Zod schemas (`request.body` / `request.query` /
+   * `request.params`) before the handler runs; invalid requests get a
+   * structured 422 response. Available on every adapter.
+   *
+   * - `true` / `false` — enable or disable validation (legacy boolean form).
+   * - `{ enabled?, writeback? }` — object form (v1.15). Set `writeback: true`
+   *   to push the *parsed* payload (Zod coercions + defaults applied) back onto
+   *   the request so the handler reads the coerced values:
+   *     - Express / Fastify / NestJS — written to `req.body` / `req.query` / `req.params`.
+   *     - Hono — overlaid on `c.req.param()` / `c.req.query()` / `c.req.json()`;
+   *       also available as `c.get('doctreenValidated')`.
+   *     - Koa — written to `ctx.request.body` and `ctx.query`; coerced path
+   *       params are exposed on `ctx.state.doctreenValidated.params` (the Koa
+   *       router re-derives `ctx.params` from the raw URL after validation).
+   * - `response` — dev-mode response assertion (v1.15). `'warn'` logs a mismatch
+   *   between the handler's response and the declared Zod `response` schema and
+   *   passes it through; `'throw'` surfaces a 500 in development; `'off'`
+   *   (default) disables it. Never coerces the response.
    * @default false
    */
-  validate?: boolean;
+  validate?: boolean | { enabled?: boolean; writeback?: boolean; response?: 'off' | 'warn' | 'throw' | boolean };
+
+  /**
+   * Default error responses applied to every route (v1.15), keyed by HTTP
+   * status. Merged into each route's own `errors` — the route's own entry wins
+   * on a status conflict. Kills the boilerplate of repeating `401`/`403`/`422`
+   * on every `defineRoute`. Same shape as a route's `errors`.
+   *
+   * @example
+   * defaultErrors: {
+   *   401: 'Authentication required',
+   *   403: 'Forbidden',
+   *   422: { description: 'Validation failed', schema: s.object({ error: s.string() }) },
+   * }
+   */
+  defaultErrors?: Record<number, string | { description?: string | null; schema?: SchemaNode | unknown }>;
 
   /** OpenAPI-specific options applied to `<docsPath>/openapi.json` (v1.7+). */
   openapi?: OpenApiConfig;
@@ -408,7 +447,8 @@ export interface NormalizedConfig {
   groups: Record<string, { description: string }>;
   flows: FlowDefinition[] | null;
   flowsPath: string | null;
-  validate: boolean;
+  validate: { enabled: boolean; writeback: boolean; response: 'off' | 'warn' | 'throw' };
+  defaultErrors: ErrorEntry[] | null;
   openapi: {
     servers: OpenApiServer[];
     securitySchemes: Record<string, unknown> | null;
