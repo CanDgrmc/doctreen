@@ -212,6 +212,10 @@ function fastifyAdapter(fastify, userConfig) {
   const config   = normalizeConfig(userConfig || {});
   const registry = new RouteRegistry();
 
+  // Expose the registry for offline OpenAPI emit (v1.15). Stashed before the
+  // enabled-gate so `getOpenApiDocument` can read it after `fastify.ready()`.
+  try { fastify.__doctreenRegistry = registry; } catch (_) { /* frozen */ }
+
   if (!config.enabled) return;
 
   // Schema drift pipeline (v1.10+). See express adapter for details.
@@ -394,4 +398,26 @@ function defineRoute(handler, schemas) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-module.exports = { fastifyAdapter, defineRoute, defineSchema, s };
+/**
+ * Build the OpenAPI document for a Fastify app without listening (v1.15).
+ * Fastify captures routes via an `onRoute` hook during registration, so call
+ * `fastifyAdapter(fastify, …)` BEFORE your routes and `await fastify.ready()`
+ * before this. Lets build-time tooling emit a static `openapi.json` offline.
+ *
+ * @param {object} fastify
+ * @param {UserConfig} [userConfig]
+ * @returns {object} OpenAPI 3.1 document
+ */
+function getOpenApiDocument(fastify, userConfig) {
+  const config = normalizeConfig(userConfig || {});
+  const registry = fastify && fastify.__doctreenRegistry;
+  if (!registry) {
+    throw new Error(
+      '[doctreen] getOpenApiDocument: no registry found. Call fastifyAdapter(fastify) ' +
+      'with docs enabled and register routes (then `await fastify.ready()`) first.'
+    );
+  }
+  return buildOpenApiDocument(registry.getVisible(), config);
+}
+
+module.exports = { fastifyAdapter, getOpenApiDocument, defineRoute, defineSchema, s };

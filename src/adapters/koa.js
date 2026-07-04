@@ -400,4 +400,19 @@ function defineRoute(handler, schemas) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-module.exports = { koaAdapter, defineRoute, defineSchema, s };
+/**
+ * Build the OpenAPI document for a @koa/router without serving it (v1.15) —
+ * reads `router.stack` in-process so build-time tooling can emit a static
+ * `openapi.json`.
+ *
+ * @param {object} router  - the @koa/router instance
+ * @param {UserConfig} [userConfig]
+ * @returns {object} OpenAPI 3.1 document
+ */
+function getOpenApiDocument(router, userConfig) {
+  const config = normalizeConfig(userConfig || {});
+  const registry = buildRegistrySnapshot((router && router.stack) || [], config);
+  return buildOpenApiDocument(registry.getVisible(), config);
+}
+
+module.exports = { koaAdapter, getOpenApiDocument, defineRoute, defineSchema, s };

@@ -452,6 +452,25 @@ function introspectExpressApp(app, registry, config) {
   walkStack(router.stack, '', registry, config);
 }
 
+/**
+ * getOpenApiDocument
+ *
+ * Build the OpenAPI document for an Express app **without** starting a server
+ * (v1.15). Introspects the router stack in-process and returns the doc object,
+ * so build-time tooling (`doctreen emit-openapi`, CI) can produce a static
+ * `openapi.json` offline. Routes must be registered on `app` before calling.
+ *
+ * @param {object} app
+ * @param {UserConfig} [userConfig]
+ * @returns {object} OpenAPI 3.1 document
+ */
+function getOpenApiDocument(app, userConfig) {
+  const config = normalizeConfig(userConfig || {});
+  const registry = new RouteRegistry();
+  introspectExpressApp(app, registry, config);
+  return buildOpenApiDocument(registry.getVisible(), config);
+}
+
 function readJsonBody(req) {
   if (req.body && typeof req.body === 'object') {
     return Promise.resolve(req.body);
@@ -622,4 +641,4 @@ function defineRoute(handler, schemas) {
   return handler;
 }
 
-module.exports = { expressAdapter, defineRoute, defineSchema, s };
+module.exports = { expressAdapter, getOpenApiDocument, defineRoute, defineSchema, s };

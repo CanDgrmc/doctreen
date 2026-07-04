@@ -390,4 +390,18 @@ function defineRoute(handler, schemas) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-module.exports = { honoAdapter, defineRoute, defineSchema, s };
+/**
+ * Build the OpenAPI document for a Hono app without serving it (v1.15) — reads
+ * `app.routes` in-process so build-time tooling can emit a static `openapi.json`.
+ *
+ * @param {object} app
+ * @param {UserConfig} [userConfig]
+ * @returns {object} OpenAPI 3.1 document
+ */
+function getOpenApiDocument(app, userConfig) {
+  const config = normalizeConfig(userConfig || {});
+  const registry = buildRegistrySnapshot((app && app.routes) || [], config);
+  return buildOpenApiDocument(registry.getVisible(), config);
+}
+
+module.exports = { honoAdapter, getOpenApiDocument, defineRoute, defineSchema, s };

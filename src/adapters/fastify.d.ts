@@ -79,6 +79,9 @@ export interface FastifyLike {
  */
 export declare function fastifyAdapter(fastify: FastifyLike, userConfig?: UserConfig): void;
 
+/** Build the OpenAPI 3.1 document from a Fastify app offline (call after `await fastify.ready()`). */
+export declare function getOpenApiDocument(fastify: FastifyLike, userConfig?: UserConfig): object;
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**

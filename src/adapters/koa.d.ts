@@ -87,6 +87,9 @@ export interface KoaRouterLike {
  */
 export declare function koaAdapter(router: KoaRouterLike, userConfig?: UserConfig): void;
 
+/** Build the OpenAPI 3.1 document from a @koa/router offline (no server). */
+export declare function getOpenApiDocument(router: KoaRouterLike, userConfig?: UserConfig): object;
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**

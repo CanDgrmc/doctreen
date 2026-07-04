@@ -74,6 +74,9 @@ export interface HonoLike {
  */
 export declare function honoAdapter(app: HonoLike, userConfig?: UserConfig): void;
 
+/** Build the OpenAPI 3.1 document from a Hono app offline (no server). */
+export declare function getOpenApiDocument(app: HonoLike, userConfig?: UserConfig): object;
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**

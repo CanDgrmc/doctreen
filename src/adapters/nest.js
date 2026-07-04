@@ -640,8 +640,25 @@ function defineRoute(handler, schemas) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Build the OpenAPI document for a NestJS app without listening (v1.15) — runs
+ * container discovery in-process so build-time tooling can emit a static
+ * `openapi.json`. The app must be created (`await NestFactory.create(...)`)
+ * before calling; `app.listen()` is not required.
+ *
+ * @param {object} app  - INestApplication
+ * @param {import('../index').UserConfig} [userConfig]
+ * @returns {object} OpenAPI 3.1 document
+ */
+function getOpenApiDocument(app, userConfig) {
+  const config = normalizeConfig(userConfig || {});
+  const registry = discoverRoutes(app, config);
+  return buildOpenApiDocument(registry.getVisible(), config);
+}
+
 module.exports = {
   nestAdapter,
+  getOpenApiDocument,
   DocRoute,
   DocDescription,
   DocHeaders,

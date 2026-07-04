@@ -39,6 +39,9 @@ export declare function expressAdapter(
   userConfig?: UserConfig
 ): RequestHandler;
 
+/** Build the OpenAPI 3.1 document from an Express app offline (no server). */
+export declare function getOpenApiDocument(app: ExpressLike, userConfig?: UserConfig): object;
+
 /**
  * Schema definitions passed to `defineRoute`.
  */

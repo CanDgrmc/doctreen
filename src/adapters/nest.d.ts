@@ -94,6 +94,9 @@ export interface NestApplicationLike {
  */
 export declare function nestAdapter(app: NestApplicationLike, userConfig?: UserConfig): void;
 
+/** Build the OpenAPI 3.1 document from a created INestApplication offline (no listen). */
+export declare function getOpenApiDocument(app: NestApplicationLike, userConfig?: UserConfig): object;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Decorators
 // ─────────────────────────────────────────────────────────────────────────────

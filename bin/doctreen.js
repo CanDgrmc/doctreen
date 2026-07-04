@@ -38,6 +38,7 @@ function printRootUsage() {
   console.error('  mock           Serve a fake API from an OpenAPI document (faker-backed)');
   console.error('  codegen types  Generate TypeScript type declarations from an OpenAPI doc');
   console.error('  codegen client Generate a typed fetch client from an OpenAPI doc');
+  console.error('  emit-openapi   Build a static openapi.json from your app (offline, no server)');
   console.error('');
   console.error('Run `' + PROGRAM + ' <command> --help` for command-specific options.');
 }
@@ -187,6 +188,21 @@ function parseArgs(argv) {
       else { console.error('Unknown option: ' + a); return { command: 'mock-help', error: true }; }
     }
     return { command: 'mock', opts: opts };
+  }
+  if (cmd === 'emit-openapi' || cmd === 'emit') {
+    const opts = { app: null, adapter: null, out: 'openapi.json', export: null, title: null, docVersion: null };
+    while (args.length) {
+      const a = args.shift();
+      if (a === '--app') opts.app = args.shift();
+      else if (a === '--adapter') opts.adapter = args.shift();
+      else if (a === '--out') opts.out = args.shift();
+      else if (a === '--export') opts.export = args.shift();
+      else if (a === '--title') opts.title = args.shift();
+      else if (a === '--doc-version') opts.docVersion = args.shift();
+      else if (a === '-h' || a === '--help') return { command: 'emit-openapi-help' };
+      else { console.error('Unknown option: ' + a); return { command: 'emit-openapi-help', error: true }; }
+    }
+    return { command: 'emit-openapi', opts: opts };
   }
   if (cmd === 'codegen') {
     const sub = args.shift();
@@ -567,6 +583,73 @@ async function runLintOpenApi(opts) {
   if (threshold > 0) process.exit(1);
 }
 
+function printEmitOpenApiUsage() {
+  console.error('Usage: doctreen emit-openapi --adapter <name> --app <module> [--out openapi.json]');
+  console.error('');
+  console.error('Builds a static OpenAPI 3.1 document from your app WITHOUT starting a server,');
+  console.error('so codegen / CI can run offline. The app module must register its routes and');
+  console.error('export the app (or router, for Koa) — no app.listen() required.');
+  console.error('');
+  console.error('  --adapter <name>   express | fastify | hono | koa | nest   (required)');
+  console.error('  --app <module>     Path to a module exporting the app/router (required)');
+  console.error('  --export <prop>    Named export to use (default: app / router / default / module)');
+  console.error('  --out <file>       Output path (default: openapi.json)');
+  console.error('  --title <t>        Override info.title');
+  console.error('  --doc-version <v>  Override info.version');
+  console.error('');
+  console.error('Notes: Fastify — call fastifyAdapter() before routes and export a promise that');
+  console.error('resolves after `await fastify.ready()`. Nest — export the created INestApplication.');
+}
+
+async function runEmitOpenApi(opts) {
+  const path = require('path');
+  const fs = require('fs');
+  const ADAPTERS = ['express', 'fastify', 'hono', 'koa', 'nest'];
+
+  if (!opts.app) { console.error('Error: --app <module> is required.'); printEmitOpenApiUsage(); process.exit(2); }
+  if (!opts.adapter || ADAPTERS.indexOf(opts.adapter) === -1) {
+    console.error('Error: --adapter must be one of: ' + ADAPTERS.join(', ')); process.exit(2);
+  }
+
+  let mod;
+  try { mod = require(path.resolve(opts.app)); }
+  catch (e) { console.error('Error loading --app module: ' + (e && e.message)); process.exit(1); }
+
+  // Resolve the app/router. Default to `module.exports` itself (CJS) or its
+  // `default` (ESM interop). We deliberately do NOT probe `.app`/`.router`,
+  // since framework app objects expose those as internals (e.g. Express' app
+  // has a deprecated `.router` getter). Use `--export` for named exports.
+  let app = opts.export ? mod[opts.export] : ((mod && mod.default) || mod);
+  if (app && typeof app.then === 'function') app = await app; // async bootstrap
+  if (!app || (typeof app !== 'object' && typeof app !== 'function')) {
+    console.error('Error: could not resolve the app export from ' + opts.app + '. Pass --export <name>.');
+    process.exit(1);
+  }
+
+  let adapter;
+  try { adapter = require('../src/adapters/' + opts.adapter); }
+  catch (e) { console.error('Error loading adapter "' + opts.adapter + '": ' + (e && e.message)); process.exit(1); }
+  if (typeof adapter.getOpenApiDocument !== 'function') {
+    console.error('Error: adapter "' + opts.adapter + '" does not support offline emit.'); process.exit(1);
+  }
+
+  const config = {};
+  if (opts.title || opts.docVersion) config.meta = {};
+  if (opts.title) config.meta.title = opts.title;
+  if (opts.docVersion) config.meta.version = opts.docVersion;
+
+  let doc;
+  try {
+    doc = adapter.getOpenApiDocument(app, config);
+    if (doc && typeof doc.then === 'function') doc = await doc;
+  } catch (e) { console.error('Error building OpenAPI document: ' + (e && e.message)); process.exit(1); }
+
+  const outPath = path.resolve(opts.out);
+  fs.writeFileSync(outPath, JSON.stringify(doc, null, 2) + '\n', 'utf8');
+  const count = (doc && doc.paths) ? Object.keys(doc.paths).length : 0;
+  console.error('Wrote ' + outPath + ' (' + count + ' path' + (count === 1 ? '' : 's') + ').');
+}
+
 async function main() {
   const parsed = parseArgs(process.argv);
   switch (parsed.command) {
@@ -582,6 +665,8 @@ async function main() {
     case 'mock': await runMock(parsed.opts); break;
     case 'codegen-help': printCodegenUsage(); process.exit(parsed.error ? 2 : 0); break;
     case 'codegen': await runCodegen(parsed.opts); break;
+    case 'emit-openapi-help': printEmitOpenApiUsage(); process.exit(parsed.error ? 2 : 0); break;
+    case 'emit-openapi': await runEmitOpenApi(parsed.opts); break;
     default: printRootUsage(); process.exit(2);
   }
 }
