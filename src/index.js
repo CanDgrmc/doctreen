@@ -295,16 +295,23 @@ function normalizeDriftConfig(input) {
 
 /**
  * Normalise the `validate` config into the canonical object form
- * `{ enabled, writeback }`.
+ * `{ enabled, writeback, response, statusAware, warnUndeclaredStatus }`.
  *
  * Accepts:
- *   - `undefined` / `false` → `{ enabled: false, writeback: false }`
- *   - `true`               → `{ enabled: true,  writeback: false }` (legacy: validate, don't mutate)
- *   - `{ enabled?, writeback? }` → object form; providing an object implies
- *     `enabled` unless it is set to `false` explicitly.
+ *   - `undefined` / `false` → `{ enabled: false, writeback: false, ... }`
+ *   - `true`               → `{ enabled: true,  writeback: false, ... }` (legacy: validate, don't mutate)
+ *   - `{ enabled?, writeback?, response?, statusAware?, warnUndeclaredStatus? }`
+ *     → object form; providing an object implies `enabled` unless it is set to
+ *     `false` explicitly.
  *
- * @param {boolean|{enabled?:boolean,writeback?:boolean}|undefined} input
- * @returns {{ enabled: boolean, writeback: boolean }}
+ * `statusAware` (default `true`, v1.16) makes response assertion pick the schema
+ * for the ACTUAL status code; set it to `false` to restore the pre-v1.16
+ * behaviour of asserting the single success schema against every response.
+ * `warnUndeclaredStatus` (default `false`) emits a separate signal when a route
+ * returns a status with no declared schema.
+ *
+ * @param {boolean|{enabled?:boolean,writeback?:boolean,response?:any,statusAware?:boolean,warnUndeclaredStatus?:boolean}|undefined} input
+ * @returns {{ enabled: boolean, writeback: boolean, response: 'off'|'warn'|'throw', statusAware: boolean, warnUndeclaredStatus: boolean }}
  */
 function normalizeValidate(input) {
   if (input && typeof input === 'object') {
@@ -312,9 +319,11 @@ function normalizeValidate(input) {
       enabled: input.enabled !== false,
       writeback: Boolean(input.writeback),
       response: normalizeResponseMode(input.response),
+      statusAware: input.statusAware !== false,
+      warnUndeclaredStatus: Boolean(input.warnUndeclaredStatus),
     };
   }
-  return { enabled: Boolean(input), writeback: false, response: 'off' };
+  return { enabled: Boolean(input), writeback: false, response: 'off', statusAware: true, warnUndeclaredStatus: false };
 }
 
 /**

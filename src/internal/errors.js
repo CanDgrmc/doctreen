@@ -1,14 +1,20 @@
 'use strict';
 
 const { convertSchema } = require('./schemas');
+const { isZodSchema } = require('../adapters/zod');
 
 /**
  * Normalise a user-facing error map — `{ 401: 'msg', 422: { description, schema } }`
- * — into the internal `ErrorEntry[]` form `{ status, description, schema }`.
- * Schema values (SchemaNode or Zod) are converted. Returns null when empty.
+ * — into the internal `ErrorEntry[]` form `{ status, description, schema, validator }`.
+ * Schema values (SchemaNode or Zod) are converted to a SchemaNode for the docs UI.
+ * When the declared schema is a Zod schema its *original* is preserved in
+ * `validator` so status-aware response assertion (v1.16) can `.safeParse()`
+ * against the exact schema — a SchemaNode is descriptive, not a parser, so it
+ * cannot validate. `validator` is null for description-only or `s.*`-only errors.
+ * Returns null when empty.
  *
  * @param {Record<number, string | { description?: string|null, schema?: any }>|null|undefined} map
- * @returns {Array<{status:number,description:string|null,schema:any}>|null}
+ * @returns {Array<{status:number,description:string|null,schema:any,validator:any}>|null}
  */
 function normalizeErrorMap(map) {
   if (!map || typeof map !== 'object') return null;
@@ -18,12 +24,15 @@ function normalizeErrorMap(map) {
     if (!status) continue;
     const val = map[key];
     if (typeof val === 'string') {
-      out.push({ status: status, description: val, schema: null });
+      out.push({ status: status, description: val, schema: null, validator: null });
+    } else if (isZodSchema(val)) {
+      out.push({ status: status, description: null, schema: convertSchema(val) || null, validator: val });
     } else if (val && typeof val === 'object') {
       out.push({
         status: status,
         description: val.description != null ? val.description : null,
         schema: convertSchema(val.schema) || null,
+        validator: isZodSchema(val.schema) ? val.schema : (val.validator || null),
       });
     }
   }

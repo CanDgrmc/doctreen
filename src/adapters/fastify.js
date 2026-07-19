@@ -14,7 +14,7 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
+const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, isStatusAware, shouldWarnUndeclaredStatus, reportResponseIssues, reportUndeclaredStatus } = require('../internal/validate');
 const { createDriftPipeline, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
@@ -31,12 +31,15 @@ function normalizeErrors(errors) {
   return Object.keys(errors).map(function (status) {
     const value = errors[Number(status)];
     if (typeof value === 'string') {
-      return { status: Number(status), description: value, schema: null };
+      return { status: Number(status), description: value, schema: null, validator: null };
     }
     return {
       status: Number(status),
       description: (value && value.description) || null,
       schema: (value && value.schema) || null,
+      // Original Zod schema (preserved by normalizeRouteSchemas) for
+      // status-aware response assertion (v1.16). null when none/`s.*`-only.
+      validator: (value && value.validator) || null,
     };
   });
 }
@@ -273,10 +276,14 @@ function fastifyAdapter(fastify, userConfig) {
     }
   });
 
-  // ── Response assertion (v1.15 dev-mode) ─────────────────────────────────
+  // ── Response assertion (v1.15 dev-mode; status-aware v1.16) ─────────────
   // preSerialization runs with the response *object* before it is serialised,
-  // so we can assert it against the declared Zod response schema. 'warn' logs
-  // and passes through; 'throw' bubbles a 500 in development.
+  // so we can assert it against the declared Zod schema for the ACTUAL status
+  // code — success schema for 2xx, the declared error schema for a 4xx/5xx.
+  // A status declared with only a description (no schema) is skipped, so error
+  // envelopes no longer produce phantom success-schema drift. 'warn' logs and
+  // passes through; 'throw' bubbles a 500 in development. Neither mode ever
+  // mutates the body or status.
   fastify.addHook('preSerialization', async function (req, reply, payload) {
     const rMode = responseMode(config.validate);
     if (rMode === 'off') return payload;
@@ -285,10 +292,16 @@ function fastifyAdapter(fastify, userConfig) {
     if (!routePath) return payload;
     const entry = registry.find(routeMethod, routePath);
     if (!entry) return payload;
-    const rSchema = resolveResponseValidator(entry, reply.statusCode);
-    if (rSchema) {
-      const rv = validateResponse(rSchema, payload);
-      if (!rv.ok) reportResponseIssues(rMode, routeMethod + ' ' + routePath, rv.issues);
+    const label = routeMethod + ' ' + routePath;
+    const resolution = resolveResponseValidator(entry, reply.statusCode, {
+      defaultErrors: config.defaultErrors,
+      statusAware: isStatusAware(config.validate),
+    });
+    if (resolution.validator) {
+      const rv = validateResponse(resolution.validator, payload);
+      if (!rv.ok) reportResponseIssues(rMode, label, resolution.status, resolution.source, rv.issues);
+    } else if (!resolution.declared && shouldWarnUndeclaredStatus(config.validate)) {
+      reportUndeclaredStatus(label, resolution.status);
     }
     return payload;
   });

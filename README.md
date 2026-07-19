@@ -5,7 +5,7 @@
 [**Docs →**](https://doctreen.dev) &nbsp;·&nbsp; [**Live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](https://doctreen.dev/docs/roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.15.0** &nbsp;—&nbsp; **Path-parameter schemas + validation** — `defineRoute` now accepts `request: { params }`, so `:id` and friends are validated by the same Zod schema that documents them, with a structured 422 on mismatch. **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.15.0)**
+> **What's new in v1.16.0** &nbsp;—&nbsp; **Status-aware response validation** — `validate: { response }` now asserts each response against the schema declared for its *actual* status code, so error envelopes (`4xx`/`5xx`) stop producing phantom success-schema warnings while genuine `2xx` drift is still caught. **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.16.0)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder) and you get an interactive docs UI, OpenAPI 3.1 export, runnable integration flows, and 422-on-invalid-request validation — for **Express, Fastify, Hono, Koa, and NestJS**. No router rewrite, no separate spec file, no decorator boilerplate on every DTO field.
@@ -85,6 +85,44 @@ That single declaration drives:
 
 ---
 
+## Response validation (dev-mode)
+
+Opt in with `validate: { response: 'warn' }` (log a mismatch and pass through) or
+`'throw'` (surface a 500 in development). It never coerces or rewrites the body
+or status — it only checks. Like request validation, it is a no-op when
+`NODE_ENV === 'production'`.
+
+Since **v1.16** the assertion is **status-aware**: the schema it checks against
+depends on the response's actual status code, not just the success schema.
+
+| Response status | Schema asserted |
+|---|---|
+| `2xx` with a declared `response` schema (single, or the matching entry in a status-keyed `response` map) | the `response` schema |
+| `4xx`/`5xx` with a declared error **schema** (`errors[status]`, else `defaultErrors[status]`) | that error schema |
+| `4xx`/`5xx` declared with only a **description** (`errors: { 422: 'Validation' }`, no schema) | none — skipped, no warning |
+| any status declared **nowhere** | none — skipped (opt into a signal with `warnUndeclaredStatus: true`) |
+
+**Route-wins merge.** When both a route's own `errors[status]` and the adapter's
+`defaultErrors[status]` declare the same status, the route-local schema wins —
+the same precedence used for descriptions and the OpenAPI export.
+
+Statuses with no declared schema are **not** validated: there is no contract to
+check against, so nothing is asserted and (by default) nothing is logged. This
+is why declaring an error with only a description silences it rather than
+warning — the description documents the status without pinning its body shape.
+
+A real mismatch names the status and where the schema came from:
+
+```
+[doctreen] response for POST /staff (422) does not match the schema declared for status 422 (route errors):
+  - response.error: Required
+```
+
+Need the pre-v1.16 behaviour (assert the single success schema against every
+response)? Set `validate: { response: 'warn', statusAware: false }`.
+
+---
+
 ## Docs
 
 Everything lives at **[doctreen.dev](https://doctreen.dev)**:
@@ -123,7 +161,7 @@ Each adapter also has a fully-typed TS variant (`npm run example:ts`, `:fastify:
 
 ## Roadmap
 
-**Shipped:** runtime validation (v1.6) · OpenAPI 3.1 export (v1.7) · security schemes + hidden routes (v1.8) · `headHtml` (v1.9) · schema drift detection (v1.10) · `$ref` dedup, tags, callbacks/webhooks, examples, `lint openapi` (v1.11) · spec-driven mock server (v1.12) · typed TS codegen + fetch client (v1.13) · schema enums/nullable/defaults (v1.14) · validation completeness — path-param schemas, coerce/default write-back, response assertions, status-keyed responses, `defaultErrors`, Zod `$ref` codegen, offline `emit-openapi` (v1.15)
+**Shipped:** runtime validation (v1.6) · OpenAPI 3.1 export (v1.7) · security schemes + hidden routes (v1.8) · `headHtml` (v1.9) · schema drift detection (v1.10) · `$ref` dedup, tags, callbacks/webhooks, examples, `lint openapi` (v1.11) · spec-driven mock server (v1.12) · typed TS codegen + fetch client (v1.13) · schema enums/nullable/defaults (v1.14) · validation completeness — path-param schemas, coerce/default write-back, response assertions, status-keyed responses, `defaultErrors`, Zod `$ref` codegen, offline `emit-openapi` (v1.15) · status-aware response validation (v1.16)
 
 **Next up:** AI-native endpoints (`/llm.txt`, MCP server) · contract testing & spec diff · `doctreen init` CLI
 

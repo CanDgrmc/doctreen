@@ -1,12 +1,12 @@
 {
   "name": "doctreen",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "Code-first API docs + OpenAPI 3.1 export + integration tests + runtime validation for Node.js. Define routes once with Zod and get docs, runnable flows, 422-on-invalid-request validation, OpenAPI 3.1 export, and schema drift detection for Express, Fastify, Hono, Koa, and NestJS.",
   "main": "src/index.js",
   "types": "src/index.d.ts",
   "bin": {
-    "doctreen": "./bin/doctreen.js",
-    "doctreen-flow": "./bin/doctreen-flow.js"
+    "doctreen": "bin/doctreen.js",
+    "doctreen-flow": "bin/doctreen-flow.js"
   },
   "exports": {
     ".": {
@@ -55,6 +55,7 @@
     }
   },
   "scripts": {
+    "test": "node --test",
     "example": "node example/app.js",
     "example:ts": "npx tsx example/app.ts",
     "example:fastify": "node example/fastify-app.js",
@@ -108,7 +109,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/CanDgrmc/doctreen.git"
+    "url": "git+https://github.com/CanDgrmc/doctreen.git"
   },
   "homepage": "https://github.com/CanDgrmc/doctreen#readme",
   "bugs": {
