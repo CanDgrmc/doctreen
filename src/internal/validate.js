@@ -174,22 +174,105 @@ function validateResponse(schema, body) {
 }
 
 /**
- * Resolve the Zod response validator for a given response status code.
- *
- * For status-keyed responses (v1.15) only the schema declared for that exact
- * status is asserted — an undeclared status is left unchecked. For a single
- * declared response schema, that schema is used regardless of status.
- *
- * @param {any} entry   - RouteEntry (may carry `responseValidators` map or single `responseValidator`)
- * @param {number|string} status
+ * Whether a status code is a 2xx success.
+ * @param {number} status
+ * @returns {boolean}
+ */
+function is2xx(status) {
+  return status >= 200 && status < 300;
+}
+
+/**
+ * Find the ErrorEntry declared for `status` in an ErrorEntry[] (or null).
+ * @param {Array<{status:number}>|null|undefined} list
+ * @param {number} status
  * @returns {any|null}
  */
-function resolveResponseValidator(entry, status) {
-  if (!entry) return null;
-  if (entry.responseValidators) {
-    return entry.responseValidators[String(status)] || null;
+function findErrorEntry(list, status) {
+  if (!Array.isArray(list)) return null;
+  for (let i = 0; i < list.length; i++) {
+    if (Number(list[i].status) === status) return list[i];
   }
-  return entry.responseValidator || null;
+  return null;
+}
+
+/**
+ * A resolution describing how a response should be asserted for a status code.
+ * @typedef {Object} ResponseResolution
+ * @property {any|null}  validator - Zod schema to assert against, or null (nothing to check)
+ * @property {string|null} source  - where the schema came from: 'response' | 'route errors' | 'defaultErrors'
+ * @property {boolean}   declared  - whether *any* contract (schema or description) was declared for this status
+ * @property {number}    status    - the numeric status resolved against
+ */
+
+/**
+ * Resolve how a response should be validated for a given status code (v1.16,
+ * status-aware). The schema asserted now depends on the *actual* status:
+ *
+ *   - 2xx: the declared `response` schema (single, or the exact match in a
+ *     status-keyed `response` map). Today's behaviour.
+ *   - non-2xx: the schema declared for that exact status — first the status-keyed
+ *     `response` map, then route-local `errors[status]` (which WINS), then the
+ *     adapter's `defaultErrors[status]`. A status declared with only a
+ *     description (or an `s.*`-only schema that cannot parse) resolves to
+ *     `validator: null, declared: true` → assertion is skipped silently.
+ *   - a status declared nowhere resolves to `validator: null, declared: false`
+ *     → skipped (optionally surfaced via `warnUndeclaredStatus`).
+ *
+ * When `statusAware` is false the legacy v1.15 behaviour is used as an escape
+ * hatch: the single `response` schema (or exact status-keyed match) is asserted
+ * regardless of status class.
+ *
+ * @param {any} entry   - RouteEntry (may carry `responseValidators` map / `responseValidator` / `errors`)
+ * @param {number|string} status
+ * @param {{ defaultErrors?: Array<any>|null, statusAware?: boolean }} [options]
+ * @returns {ResponseResolution}
+ */
+function resolveResponseValidator(entry, status, options) {
+  const opts = options || {};
+  const numeric = Number(status);
+  const key = String(status);
+  const keyed = entry && entry.responseValidators;
+  const hasKeyed = !!(keyed && Object.prototype.hasOwnProperty.call(keyed, key));
+
+  // Legacy escape hatch — pre-v1.16 behaviour: assert the single success schema
+  // (or exact status-keyed match) against every response, ignoring status class.
+  if (opts.statusAware === false) {
+    if (!entry) return { validator: null, source: null, declared: false, status: numeric };
+    if (keyed) {
+      return { validator: (hasKeyed ? keyed[key] : null) || null, source: 'response', declared: hasKeyed, status: numeric };
+    }
+    const v = entry.responseValidator || null;
+    return { validator: v, source: v ? 'response' : null, declared: !!v, status: numeric };
+  }
+
+  if (!entry) return { validator: null, source: null, declared: false, status: numeric };
+
+  // A status-keyed `response` map is authoritative for any status it declares.
+  if (hasKeyed) {
+    return { validator: keyed[key] || null, source: 'response', declared: true, status: numeric };
+  }
+
+  if (is2xx(numeric)) {
+    // 2xx: single declared success schema. A keyed map that does not include
+    // this 2xx status leaves it undeclared (exact-match semantics preserved).
+    if (!keyed && entry.responseValidator) {
+      return { validator: entry.responseValidator, source: 'response', declared: true, status: numeric };
+    }
+    return { validator: null, source: null, declared: false, status: numeric };
+  }
+
+  // non-2xx: declared error schemas. Route-local errors win over defaultErrors.
+  const routeHit = findErrorEntry(entry.errors, numeric);
+  if (routeHit) {
+    return { validator: routeHit.validator || null, source: 'route errors', declared: true, status: numeric };
+  }
+  const defHit = findErrorEntry(opts.defaultErrors, numeric);
+  if (defHit) {
+    return { validator: defHit.validator || null, source: 'defaultErrors', declared: true, status: numeric };
+  }
+
+  return { validator: null, source: null, declared: false, status: numeric };
 }
 
 /**
@@ -207,18 +290,50 @@ function responseMode(adapterDefault) {
 }
 
 /**
+ * Whether status-aware response resolution is on (v1.16 default). Set
+ * `validate: { statusAware: false }` to fall back to the legacy behaviour.
+ *
+ * @param {boolean|{statusAware?:boolean}} adapterDefault
+ * @returns {boolean}
+ */
+function isStatusAware(adapterDefault) {
+  if (adapterDefault && typeof adapterDefault === 'object' && adapterDefault.statusAware === false) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Whether responses whose status has no declared schema should emit a separate
+ * "undeclared status" signal. Opt-in via `validate: { warnUndeclaredStatus: true }`.
+ *
+ * @param {boolean|{warnUndeclaredStatus?:boolean}} adapterDefault
+ * @returns {boolean}
+ */
+function shouldWarnUndeclaredStatus(adapterDefault) {
+  return !!(adapterDefault && typeof adapterDefault === 'object' && adapterDefault.warnUndeclaredStatus);
+}
+
+/**
  * Report a response-schema mismatch according to `mode`. In `'throw'` mode a
  * tagged Error is thrown (adapters surface it as a 500 in development); in
  * `'warn'` mode the mismatch is logged and the original response passes
  * through unchanged.
  *
+ * The message names the *actual* status code and, when known, the schema
+ * source (`route errors` / `defaultErrors` / `response`) so a status-specific
+ * mismatch is not mistaken for success-schema drift (v1.16).
+ *
  * @param {'warn'|'throw'} mode
- * @param {string} label   - e.g. 'GET /users/:id'
+ * @param {string} label   - e.g. 'POST /staff'
+ * @param {number|string} status - the response status code that was returned
+ * @param {string|null} source   - where the asserted schema came from
  * @param {Array<{path:string,message:string,code:string}>} issues
  */
-function reportResponseIssues(mode, label, issues) {
+function reportResponseIssues(mode, label, status, source, issues) {
   const detail = issues.map(function (i) { return '  - ' + i.path + ': ' + i.message; }).join('\n');
-  const msg = '[doctreen] response for ' + label + ' does not match the declared schema:\n' + detail;
+  const src = source ? ' (' + source + ')' : '';
+  const msg = '[doctreen] response for ' + label + ' (' + status + ') does not match the schema declared for status ' + status + src + ':\n' + detail;
   if (mode === 'throw') {
     const err = new Error(msg);
     /** @type {any} */ (err).doctreenResponseInvalid = true;
@@ -226,6 +341,20 @@ function reportResponseIssues(mode, label, issues) {
   }
   // eslint-disable-next-line no-console
   console.warn(msg);
+}
+
+/**
+ * Emit the opt-in "undeclared status" signal — a response was returned with a
+ * status that has no declared schema anywhere, so no contract could be
+ * asserted. Always warn-level (there is nothing to enforce), even under
+ * `'throw'` mode.
+ *
+ * @param {string} label   - e.g. 'POST /staff'
+ * @param {number|string} status
+ */
+function reportUndeclaredStatus(label, status) {
+  // eslint-disable-next-line no-console
+  console.warn('[doctreen] response for ' + label + ' (' + status + ') returned an undeclared status ' + status + ' — no schema to validate against');
 }
 
 /**
@@ -274,5 +403,8 @@ module.exports = {
   shouldWriteback,
   applyWriteback,
   responseMode,
+  isStatusAware,
+  shouldWarnUndeclaredStatus,
   reportResponseIssues,
+  reportUndeclaredStatus,
 };

@@ -49,6 +49,12 @@ export interface ErrorEntry {
   description: string | null;
   /** Optional schema of the error response body. */
   schema: SchemaNode | null;
+  /**
+   * Original Zod schema for this error body, preserved (v1.16) for status-aware
+   * response assertion. `null` when the error was declared with only a
+   * description or with an `s.*`-only schema (which cannot parse). Internal.
+   */
+  validator?: unknown | null;
 }
 
 /**
@@ -238,12 +244,20 @@ export interface UserConfig {
    *       params are exposed on `ctx.state.doctreenValidated.params` (the Koa
    *       router re-derives `ctx.params` from the raw URL after validation).
    * - `response` — dev-mode response assertion (v1.15). `'warn'` logs a mismatch
-   *   between the handler's response and the declared Zod `response` schema and
-   *   passes it through; `'throw'` surfaces a 500 in development; `'off'`
-   *   (default) disables it. Never coerces the response.
+   *   between the handler's response and the declared Zod schema and passes it
+   *   through; `'throw'` surfaces a 500 in development; `'off'` (default)
+   *   disables it. Never coerces the response.
+   * - `statusAware` (v1.16, default `true`) — response assertion picks the schema
+   *   for the ACTUAL status code: the `response` schema for 2xx, and the schema
+   *   declared for that exact status (route-local `errors[status]`, then
+   *   `defaultErrors[status]`) for a 4xx/5xx. A status declared with only a
+   *   description is skipped, so error envelopes no longer trigger phantom
+   *   success-schema warnings. Set `false` to restore the pre-v1.16 behaviour.
+   * - `warnUndeclaredStatus` (v1.16, default `false`) — also warn when a route
+   *   returns a status that has no declared schema anywhere.
    * @default false
    */
-  validate?: boolean | { enabled?: boolean; writeback?: boolean; response?: 'off' | 'warn' | 'throw' | boolean };
+  validate?: boolean | { enabled?: boolean; writeback?: boolean; response?: 'off' | 'warn' | 'throw' | boolean; statusAware?: boolean; warnUndeclaredStatus?: boolean };
 
   /**
    * Default error responses applied to every route (v1.15), keyed by HTTP
@@ -447,7 +461,7 @@ export interface NormalizedConfig {
   groups: Record<string, { description: string }>;
   flows: FlowDefinition[] | null;
   flowsPath: string | null;
-  validate: { enabled: boolean; writeback: boolean; response: 'off' | 'warn' | 'throw' };
+  validate: { enabled: boolean; writeback: boolean; response: 'off' | 'warn' | 'throw'; statusAware: boolean; warnUndeclaredStatus: boolean };
   defaultErrors: ErrorEntry[] | null;
   openapi: {
     servers: OpenApiServer[];

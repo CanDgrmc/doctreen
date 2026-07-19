@@ -149,9 +149,14 @@ function normalizeRouteSchemas(schemas) {
     for (const code of Object.keys(out.errors)) {
       const v = out.errors[code];
       if (v && typeof v === 'object' && !isZodSchema(v) && 'schema' in v) {
-        normErrors[code] = Object.assign({}, v, { schema: convertSchema(v.schema) });
+        // Preserve the original Zod error schema (if any) in `validator` for
+        // status-aware response assertion (v1.16); a SchemaNode cannot parse.
+        normErrors[code] = Object.assign({}, v, {
+          schema: convertSchema(v.schema),
+          validator: isZodSchema(v.schema) ? v.schema : (v.validator || null),
+        });
       } else if (isZodSchema(v)) {
-        normErrors[code] = { description: null, schema: convertSchema(v) };
+        normErrors[code] = { description: null, schema: convertSchema(v), validator: v };
       } else {
         normErrors[code] = v;
       }

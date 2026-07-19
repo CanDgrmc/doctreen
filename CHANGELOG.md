@@ -4,6 +4,61 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.0] — 2026-07-19
+
+Response assertion learns about status codes. In 1.15, `validate: { response }`
+asserted **every** response against the single success schema, regardless of the
+status code — so every `4xx`/`5xx` produced a phantom "does not match the
+declared schema" warning even when its body was a perfectly valid error
+envelope. In a real integration suite the warning count matched the number of
+error responses exactly. This release makes the assertion pick the schema for
+the **actual** status code.
+
+### Fixed
+
+- **Status-aware response validation.** `validate: { response: 'warn' | 'throw' }`
+  now asserts a response against the schema declared for its status: the
+  `response` schema for a `2xx`, and the schema declared for that exact status
+  (route-local `errors[status]`, then adapter `defaultErrors[status]`) for a
+  `4xx`/`5xx`. A status declared with only a description — `errors: { 422: 'Validation' }` —
+  or declared nowhere is no longer asserted, so error envelopes stop generating
+  phantom success-schema warnings. Genuine `2xx` drift is still caught.
+
+  Before / after, for a route with `response: staff` and `errors: { 422: 'Validation' }`
+  that returns a `{ error, message }` envelope with status `422`:
+
+  ```
+  # 1.15 — one phantom warning per 4xx:
+  [doctreen] response for POST /staff does not match the declared schema:
+    - response.id: Required
+    - response.name: Required
+    - response.role: Required
+    …
+
+  # 1.16 — the 422 is recognised as an error envelope; no warning.
+  ```
+
+- **Warning message names the status and source.** A real mismatch now reads
+  `response for POST /staff (422) does not match the schema declared for status
+  422 (route errors)` — the status code and where the schema came from
+  (`route errors` / `defaultErrors` / `response`) make the diagnosis obvious.
+
+### Added
+
+- **`validate: { warnUndeclaredStatus: true }`** (default `false`) — opt-in
+  signal when a route returns a status that has no declared schema anywhere. Off
+  by default so it never adds noise.
+
+### Behavior change / migration
+
+This is a bugfix and silencing the phantom warnings is the point, but the
+warning stream is narrower than in 1.15. If you built a log filter around the
+old noise, either drop it or set the escape hatch **`validate: { statusAware: false }`**
+to restore the pre-1.16 behaviour (assert the single success schema against
+every response). `statusAware` defaults to `true`. Production behaviour is
+unchanged: the adapter remains a no-op when `NODE_ENV === 'production'` (the
+default `enabled` gate), and `'warn'`/`'throw'` never mutate the body or status.
+
 ## [1.15.0] — 2026-07-04
 
 Validation, completed — this release closes the gap between what a route
