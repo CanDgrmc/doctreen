@@ -14,36 +14,14 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
+const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, responseMode, assertResponse } = require('../internal/validate');
+const { normalizeErrorMap } = require('../internal/errors');
 const { extractPathParams } = require('../internal/path-params');
-const { createDriftPipeline, authorizeReset } = require('../internal/drift');
+const { attachDriftRuntime, announceToStore, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 // Only document these HTTP methods — skip HEAD, OPTIONS (auto-added by @koa/router for GET routes)
 const HTTP_METHODS_TO_DOCUMENT = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
-
-/**
- * normalizeErrors
- *
- * Converts the user-facing errors map (Record<number, string | { description?, schema? }>)
- * into the internal ErrorEntry[] format.
- *
- * @param {Record<number, string | { description?: string|null, schema?: import('../index').SchemaNode|null }>} errors
- * @returns {import('../index').ErrorEntry[]}
- */
-function normalizeErrors(errors) {
-  return Object.keys(errors).map(function (status) {
-    const value = errors[Number(status)];
-    if (typeof value === 'string') {
-      return { status: Number(status), description: value, schema: null };
-    }
-    return {
-      status: Number(status),
-      description: (value && value.description) || null,
-      schema: (value && value.schema) || null,
-    };
-  });
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -86,7 +64,7 @@ function seedEntry(entry, handler) {
     if (entry.responseSchema === null && predef.response  !== undefined) entry.responseSchema = predef.response;
     if (entry.description    === null && predef.description)             entry.description    = predef.description;
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
-    if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
+    if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrorMap(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
     if (predef.responseValidator)                                        entry.responseValidator = predef.responseValidator;
     if (predef.responses)                                                entry.responses          = predef.responses;
@@ -212,17 +190,33 @@ function koaAdapter(router, userConfig) {
   if (!config.enabled) return;
 
   // Schema drift pipeline (v1.10+). See express adapter for details.
-  config._drift = createDriftPipeline(config);
+  attachDriftRuntime(config);
 
   /** @type {RouteRegistry|null} */
   let cachedRegistry = null;
 
-  function refreshRegistry() {
+  /** Read `router.stack` into a fresh registry, leaving the cache alone. */
+  function snapshotRegistry() {
     const layers = (router.stack || []).filter(
       (layer) => layer.path !== config.docsPath && layer.path !== config.docsPath + '/__flows/run'
     );
-    cachedRegistry = buildRegistrySnapshot(layers, config);
+    return buildRegistrySnapshot(layers, config);
+  }
+
+  function refreshRegistry() {
+    cachedRegistry = snapshotRegistry();
     return cachedRegistry;
+  }
+
+  // Route inventory (v1.17). setImmediate lets the routes registered in the
+  // same synchronous block land first — koaAdapter is called before them
+  // whenever `validate` is on. Announcing off a throwaway snapshot rather than
+  // refreshRegistry() keeps the docs cache lazy. The snapshot is only built
+  // when drift is on, so a drift-free app pays nothing for it.
+  if (config._drift.enabled) {
+    setImmediate(function () {
+      announceToStore(config._drift, snapshotRegistry().getVisible(), config.meta, config.docsPath);
+    });
   }
 
   // ── Schema drift detection (v1.10+) ─────────────────────────────────────
@@ -273,7 +267,7 @@ function koaAdapter(router, userConfig) {
         // Router-level middleware doesn't have the matched route's params
         // bound, so derive them from the pattern (v1.15). Falls back to ctx.params.
         const params = extractPathParams(entry.path, ctx.path) || ctx.params || {};
-        const result = await validateRequest(entry.requestValidators, { body: body, query: query, params: params });
+        const result = await validateRequest(entry.requestValidators, { body: body, query: query, params: params }, entry, config);
         if (!result.ok) {
           ctx.status = 422;
           ctx.body   = buildErrorBody(result.issues);
@@ -305,14 +299,11 @@ function koaAdapter(router, userConfig) {
 
       await next();
 
-      // ── Response assertion (v1.15 dev-mode) ─────────────────────────────
-      const rMode = responseMode(config.validate);
-      if (rMode !== 'off') {
-        const rSchema = resolveResponseValidator(entry, ctx.status);
-        if (rSchema) {
-          const rv = validateResponse(rSchema, ctx.body);
-          if (!rv.ok) reportResponseIssues(rMode, method + ' ' + entry.path, rv.issues);
-        }
+      // ── Response assertion (v1.15 dev-mode; status-aware v1.16) ─────────
+      // ctx.status is the status Koa will actually send, so the declared error
+      // schema is asserted for a 4xx/5xx and the success schema for a 2xx.
+      if (responseMode(config.validate) !== 'off') {
+        assertResponse(entry, ctx.status, ctx.body, config, method + ' ' + entry.path);
       }
     });
   }

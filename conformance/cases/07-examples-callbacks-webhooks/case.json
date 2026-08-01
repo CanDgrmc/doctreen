@@ -1,0 +1,113 @@
+{
+  "name": "examples-callbacks-webhooks",
+  "description": "Multi-example bags on request and response, a per-operation callback, and a document-level webhooks map. Locks the single-value (`example`) versus named-map (`examples`) rendering split, and that webhooks are emitted as a top-level 3.1 key rather than as paths.",
+  "config": {
+    "meta": {
+      "title": "Events",
+      "version": "1.0.0"
+    },
+    "openapi": {
+      "webhooks": {
+        "userCreated": {
+          "method": "POST",
+          "summary": "Fired when a user signs up",
+          "request": {
+            "body": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number"
+                },
+                "email": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/orders",
+      "params": [],
+      "description": "Place an order",
+      "requestHeaders": null,
+      "requestSchema": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "sku": {
+              "type": "string"
+            },
+            "qty": {
+              "type": "number"
+            }
+          }
+        },
+        "query": null,
+        "params": null
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          }
+        }
+      },
+      "errors": null,
+      "examples": {
+        "request": {
+          "single": {
+            "value": {
+              "sku": "ABC",
+              "qty": 1
+            },
+            "summary": "One item"
+          },
+          "bulk": {
+            "value": {
+              "sku": "ABC",
+              "qty": 50
+            },
+            "summary": "Bulk order"
+          }
+        },
+        "response": {
+          "orderId": "ord_123"
+        }
+      },
+      "callbacks": {
+        "orderShipped": {
+          "url": "{$request.body#/callbackUrl}",
+          "method": "POST",
+          "summary": "Sent when the order ships",
+          "request": {
+            "body": {
+              "type": "object",
+              "properties": {
+                "orderId": {
+                  "type": "string"
+                },
+                "trackingId": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "ack": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

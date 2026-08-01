@@ -4,6 +4,130 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.17.0] — 2026-08-01
+
+Observability release. Up to 1.16 a drift store could answer "what broke" and
+nothing else. It could not tell a route with **zero drift** apart from a route
+with **zero traffic**, it never learned a route existed until a request drifted
+on it, it saw request payloads but never responses, and it had no way to say
+*which build* produced any of it. This release closes those four gaps.
+
+Everything new is additive and gated on optional store methods: a store written
+against 1.10–1.16 implements none of them, is called for none of them, and
+behaves exactly as before. The drift hot path stays free when nobody is
+listening.
+
+### Added
+
+- **Heartbeat counters** — one counter per route per window, so "no drift" is
+  finally distinguishable from "no traffic". When a window closes the store's
+  optional `recordHeartbeats(entries, windowStart)` is called with one entry per
+  route that saw validated traffic:
+
+  ```js
+  {
+    route: { method: 'POST', path: '/users/{id}' },
+    validatedCount: 128,
+    statusCounts: { '2xx': 126, '4xx': 2 }   // only when statuses were observed
+  }
+  ```
+
+  Configured by **`drift.heartbeat`** (default `true`) and
+  **`drift.heartbeatIntervalMs`** (default `60000`, clamped to a `5000`
+  floor). The default is on, but counting never starts unless the store
+  actually implements `recordHeartbeats` — a store without it owns no Map and
+  no timer and costs one dead call per validated request, so existing setups
+  are untouched. A store that throws or rejects cannot affect the host app.
+
+- **Startup route inventory** — the optional `announceRoutes(routes, meta)` is
+  called once per adapter mount, after the route list settles, so a store can
+  surface routes no traffic has reached yet. Only visible routes are announced:
+  `hidden` routes and the adapter's own `docsPath` subtree are excluded. Method
+  and path only — the inventory reports which routes exist, it is not a schema
+  export. `meta` carries `title`, `version`, and both spec hashes over exactly
+  those routes, so a store need not fingerprint the inventory itself.
+
+- **Spec hashes — `computeSpecHashes(routes)`.** Two deterministic fingerprints
+  of a route list, both `'sha256:<hex>'`:
+
+  - `contractHash` — the behavioural contract: methods, paths, request /
+    response / error *schemas*, required and optional flags, types, enum /
+    nullable / default values, security requirements, the `hidden` flag. Free
+    text is excluded, so editing a description never moves it. Two builds with
+    the same `contractHash` are interchangeable for a client.
+  - `docHash` — everything the registry holds, free text included; any
+    documented change moves it.
+
+  Pure and deterministic — no I/O, no clock, no randomness, and the argument is
+  never mutated — so a build step and a live process agree on the hash for the
+  same code. Routes are sorted by `METHOD + ' ' + path` and every object key is
+  sorted recursively by UTF-16 code unit (never `localeCompare`: a hash may not
+  depend on the machine's locale).
+
+- **Release auto-detect — `resolveRelease(options)`.** Answers "which build of
+  the code is running", so drift can be attributed to a deploy. Returns
+  `{ sha, branch, source }` or `null`. The chain is walked in a fixed order:
+  explicit `release` option → `DOCTREEN_RELEASE` → known platform variables
+  (Vercel, Render, Railway, Heroku, GitHub Actions, `SOURCE_VERSION`) → a
+  `.doctreen-release.json` build stamp. The `.git` directory is **never** read
+  and **no process is spawned** — a `.git` reader works in dev and silently
+  fails in the production image, which is exactly where it matters. Fail-open
+  without exception: a missing file, malformed JSON or an `env` that throws all
+  degrade to `null`. Losing a sha costs a dashboard feature; throwing at boot
+  would take down the host app.
+
+- **`doctreen release stamp` CLI** — writes `.doctreen-release.json` (sha,
+  branch, `stampedAt`) at build time for platforms that set no environment
+  variables of their own, such as a bare VPS or a hand-rolled Docker build.
+  Accepts `--out <dir>`, `--sha <sha>`, `--branch <branch>`. A stamp already
+  sitting in the output directory is ignored — it is this command's own output,
+  and honouring it would let a stale sha survive forever. Exits `1` rather than
+  writing a useless stamp when no release can be determined.
+
+- **Response drift.** A response that fails the declared status-aware assertion
+  (`validate: { response: 'warn' | 'throw' }`) now feeds the drift pipeline as
+  **`part: 'response'`**, alongside the existing `'body'` and `'query'`. The
+  mismatch already computed by the assertion is translated directly — the
+  payload is never re-diffed. Consistent with the pipeline's top-level-only
+  rule, a nested path folds onto its root (`user.address.city` is reported as
+  `field: 'user'`) and a mismatch on the response root itself is dropped. Drift
+  events still carry **no payload values** — only field names, kinds and type
+  names. `drift.sampleRate` governs the whole signal, request and response
+  alike; it is one rate, not one per part.
+
+- **`DriftEvent.count`** — occurrences an event stands for, always an integer
+  `>= 1`; anything else normalises to `1`. Every counter the event feeds is
+  scaled by it, so a pre-aggregating store can report one signature once per
+  flush window instead of once per request. `count: 1` reproduces the pre-1.17
+  arithmetic exactly.
+
+- **`SPEC.md` and a language-neutral `conformance/` suite.** `SPEC.md` freezes
+  the DocTreen route model — the shape of a schema, a route, a validation
+  failure and a drift event — for anyone implementing DocTreen in another
+  language. `conformance/` is its executable half: fixture route lists in,
+  expected OpenAPI documents out, exercised below every framework adapter so a
+  case needs no HTTP server. Both are repository material and are not shipped
+  in the npm tarball. Where the document and this implementation disagree, the
+  implementation is correct and the document is the bug.
+
+### Changed
+
+- `DriftReport` route entries now count `response` in `parts` alongside `body`
+  and `query`, and `DriftEvent` carries `count`. Both are additive: a reader
+  that ignores them sees the same numbers as before.
+- Response validation resolution was consolidated so all five adapters share
+  one path. In 1.16 only Fastify called `resolveResponseValidator`; the
+  remaining four could drift apart from it.
+
+### Compatibility
+
+No breaking changes, and no new runtime dependencies — the package still ships
+zero. `announceRoutes` and `recordHeartbeats` are **optional** store methods:
+omit them and nothing is called, with no warning. Production behaviour is
+unchanged — drift and validation remain gated on their existing `enabled`
+defaults, and neither `'warn'` nor `'throw'` mutates a response body or status.
+Node `>=20`.
+
 ## [1.16.0] — 2026-07-19
 
 Response assertion learns about status codes. In 1.15, `validate: { response }`

@@ -1,0 +1,45 @@
+{
+  "name": "minimal-get",
+  "description": "One GET with a path-param schema and a response schema. Locks operationId derivation, :param → {param} conversion, the default tag from the first path segment, and the default 200 description.",
+  "config": {
+    "meta": {
+      "title": "Minimal API",
+      "version": "1.0.0"
+    }
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/users/:id",
+      "params": [
+        "id"
+      ],
+      "description": "Get a user",
+      "requestHeaders": null,
+      "requestSchema": {
+        "body": null,
+        "query": null,
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "errors": null
+    }
+  ]
+}

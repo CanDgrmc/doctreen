@@ -14,36 +14,14 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
+const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, responseMode, assertResponse } = require('../internal/validate');
+const { normalizeErrorMap } = require('../internal/errors');
 const { extractPathParams } = require('../internal/path-params');
-const { createDriftPipeline, authorizeReset } = require('../internal/drift');
+const { attachDriftRuntime, announceToStore, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 // Only document these HTTP methods — skip ALL, OPTIONS, HEAD (internal/auto-added)
 const HTTP_METHODS_TO_DOCUMENT = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
-
-/**
- * normalizeErrors
- *
- * Converts the user-facing errors map (Record<number, string | { description?, schema? }>)
- * into the internal ErrorEntry[] format.
- *
- * @param {Record<number, string | { description?: string|null, schema?: import('../index').SchemaNode|null }>} errors
- * @returns {import('../index').ErrorEntry[]}
- */
-function normalizeErrors(errors) {
-  return Object.keys(errors).map(function (status) {
-    const value = errors[Number(status)];
-    if (typeof value === 'string') {
-      return { status: Number(status), description: value, schema: null };
-    }
-    return {
-      status: Number(status),
-      description: (value && value.description) || null,
-      schema: (value && value.schema) || null,
-    };
-  });
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -87,7 +65,7 @@ function seedEntry(entry, handler) {
     if (entry.responseSchema === null && predef.response  !== undefined) entry.responseSchema = predef.response;
     if (entry.description    === null && predef.description)             entry.description    = predef.description;
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
-    if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
+    if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrorMap(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
     if (predef.responseValidator)                                        entry.responseValidator = predef.responseValidator;
     if (predef.responses)                                                entry.responses          = predef.responses;
@@ -186,17 +164,34 @@ function honoAdapter(app, userConfig) {
   if (!config.enabled) return;
 
   // Schema drift pipeline (v1.10+). See express adapter for details.
-  config._drift = createDriftPipeline(config);
+  attachDriftRuntime(config);
 
   /** @type {RouteRegistry|null} */
   let cachedRegistry = null;
 
-  function refreshRegistry() {
+  /** Read `app.routes` into a fresh registry, leaving the cache alone. */
+  function snapshotRegistry() {
     const appRoutes = (app.routes || []).filter(
       (r) => r.path !== config.docsPath && r.path !== config.docsPath + '/__flows/run'
     );
-    cachedRegistry = buildRegistrySnapshot(appRoutes, config);
+    return buildRegistrySnapshot(appRoutes, config);
+  }
+
+  function refreshRegistry() {
+    cachedRegistry = snapshotRegistry();
     return cachedRegistry;
+  }
+
+  // Route inventory (v1.17). setImmediate lets the routes registered in the
+  // same synchronous block land first — honoAdapter may be called before them.
+  // Announcing off a throwaway snapshot rather than refreshRegistry() keeps
+  // the docs cache lazy: priming it here would freeze the route list for a
+  // non-liveReload app that registers routes later. The snapshot is only built
+  // when drift is on, so a drift-free app pays nothing for it.
+  if (config._drift.enabled) {
+    setImmediate(function () {
+      announceToStore(config._drift, snapshotRegistry().getVisible(), config.meta, config.docsPath);
+    });
   }
 
   // ── Schema drift detection (v1.10+) ─────────────────────────────────────
@@ -259,7 +254,7 @@ function honoAdapter(app, userConfig) {
         // matched route pattern against the live path (v1.15).
         const params = extractPathParams(entry.path, c.req.path);
 
-        const result = await validateRequest(entry.requestValidators, { body: body, query: query, params: params });
+        const result = await validateRequest(entry.requestValidators, { body: body, query: query, params: params }, entry, config);
         if (!result.ok) return c.json(buildErrorBody(result.issues), 422);
         // v1.15 write-back — opt-in via `validate: { writeback: true }`. Hono's
         // request is read through accessor methods rather than plain properties,
@@ -295,17 +290,16 @@ function honoAdapter(app, userConfig) {
 
       await next();
 
-      // ── Response assertion (v1.15 dev-mode) ─────────────────────────────
-      const rMode = responseMode(config.validate);
-      if (rMode !== 'off' && c.res) {
-        const rSchema = resolveResponseValidator(entry, c.res.status);
-        if (rSchema) {
-          let respBody;
-          try { respBody = await c.res.clone().json(); } catch (_) { respBody = undefined; }
-          if (respBody !== undefined) {
-            const rv = validateResponse(rSchema, respBody);
-            if (!rv.ok) reportResponseIssues(rMode, method + ' ' + entry.path, rv.issues);
-          }
+      // ── Response assertion (v1.15 dev-mode; status-aware v1.16) ─────────
+      // Hono responses are Fetch `Response` objects, so the body has to be read
+      // back off a clone. A non-JSON body (text, HTML, 204 no-content) yields
+      // undefined and is skipped entirely — there is nothing to assert against
+      // a JSON schema, and guessing would fire phantom warnings.
+      if (responseMode(config.validate) !== 'off' && c.res) {
+        let respBody;
+        try { respBody = await c.res.clone().json(); } catch (_) { respBody = undefined; }
+        if (respBody !== undefined) {
+          assertResponse(entry, c.res.status, respBody, config, method + ' ' + entry.path);
         }
       }
     });

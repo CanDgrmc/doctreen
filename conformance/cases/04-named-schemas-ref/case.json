@@ -1,0 +1,82 @@
+{
+  "name": "named-schemas-ref",
+  "description": "Two routes referencing the same named schema. Locks promotion into components.schemas plus $ref replacement at every use site — the dedup that keeps large specs readable. `$named` in this fixture means \"the schema registered under that name\"; the runner substitutes the registered object before calling the exporter.",
+  "namedSchemas": {
+    "User": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        }
+      }
+    },
+    "Page": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "number"
+        },
+        "offset": {
+          "type": "number",
+          "default": 0,
+          "optional": true
+        }
+      }
+    }
+  },
+  "config": {
+    "meta": {
+      "title": "Refs",
+      "version": "3.0.0"
+    }
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/users",
+      "params": [],
+      "description": "List users",
+      "requestHeaders": null,
+      "requestSchema": null,
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$named": "User"
+            }
+          },
+          "page": {
+            "$named": "Page"
+          }
+        }
+      },
+      "errors": null
+    },
+    {
+      "method": "POST",
+      "path": "/users",
+      "params": [],
+      "description": "Create a user",
+      "requestHeaders": null,
+      "requestSchema": {
+        "body": {
+          "$named": "User"
+        },
+        "query": null,
+        "params": null
+      },
+      "responseSchema": {
+        "$named": "User"
+      },
+      "errors": null
+    }
+  ]
+}

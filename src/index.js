@@ -31,7 +31,7 @@
  */
 
 /**
- * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: { enabled: boolean, writeback: boolean, response: 'off'|'warn'|'throw' }, defaultErrors: ErrorEntry[]|null, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string, allowReset: boolean, resetToken: string|null } }} NormalizedConfig
+ * @typedef {{ docsPath: string, enabled: boolean, meta: { title: string, version: string, description: string }, exclude: Array<string|RegExp>, liveReload: boolean, groups: Record<string, { description: string }>, flows: Array<any>|null, flowsPath: string|null, validate: { enabled: boolean, writeback: boolean, response: 'off'|'warn'|'throw' }, defaultErrors: ErrorEntry[]|null, openapi: { servers: OpenApiServer[], securitySchemes: Record<string, any>|null, security: Array<Record<string, string[]>>|null }, headHtml: string|null, drift: { enabled: boolean, sampleRate: number, maxSamples: number, webhook: string|null, onDrift: Function|null, store: any|null, logLevel: string, allowReset: boolean, resetToken: string|null, heartbeat: boolean, heartbeatIntervalMs: number|null } }} NormalizedConfig
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -274,6 +274,11 @@ function normalizeDriftConfig(input) {
     logLevel: 'warn',
     allowReset: false,
     resetToken: null,
+    // v1.17 heartbeats. On by default, but `createHeartbeat` still resolves to
+    // a no-op unless the store implements the optional `recordHeartbeats`, so
+    // this default changes nothing for an existing setup.
+    heartbeat: true,
+    heartbeatIntervalMs: null,
   };
 
   if (input === false) return Object.assign({}, defaults, { enabled: false });
@@ -290,6 +295,10 @@ function normalizeDriftConfig(input) {
     logLevel: input.logLevel === 'silent' ? 'silent' : 'warn',
     allowReset: Boolean(input.allowReset),
     resetToken: typeof input.resetToken === 'string' && input.resetToken.length > 0 ? input.resetToken : null,
+    heartbeat: input.heartbeat !== undefined ? Boolean(input.heartbeat) : defaults.heartbeat,
+    heartbeatIntervalMs: typeof input.heartbeatIntervalMs === 'number'
+      ? input.heartbeatIntervalMs
+      : defaults.heartbeatIntervalMs,
   };
 }
 
@@ -806,4 +815,20 @@ module.exports = {
   parseJSDoc,
   s,
   flows: require('./flows/index'),
+
+  // v1.17 — two internal helpers promoted to the public surface for store
+  // implementations (`drift.store`), which live outside this package and can
+  // otherwise only guess at both answers. Re-exported here rather than opened
+  // up as a `./internal/*` subpath: the two functions are the contract, the
+  // modules around them are not.
+  //
+  // `resolveRelease` — "which build is running", so a store attributes drift to
+  // a deploy instead of re-implementing the detection chain and disagreeing
+  // with the library about it.
+  // `computeSpecHashes` — the real contract/doc fingerprints over a registry
+  // snapshot. A store is handed a `{ method, path }` inventory, so without this
+  // the strongest hash it could build would move on "route added" and sit still
+  // on "field changed type".
+  resolveRelease: require('./internal/release').resolveRelease,
+  computeSpecHashes: require('./internal/spec-hash').computeSpecHashes,
 };

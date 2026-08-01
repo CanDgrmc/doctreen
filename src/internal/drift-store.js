@@ -17,7 +17,14 @@
  *     record(event): void | Promise<void>
  *     report(): DriftReport | Promise<DriftReport>
  *     reset(): void | Promise<void>
+ *     announceRoutes?(routes, meta): void | Promise<void>   // optional, v1.17
  *   }
+ *
+ * `announceRoutes` is the startup route inventory: adapters call it once, with
+ * `[{ method, path }]` for every visible route and `{ title?, version? }` from
+ * the adapter config. It exists so a consumer can see routes that no traffic
+ * has hit yet. Optional by design — a store that omits it is never called, and
+ * the announcement carries no schemas, only the route list.
  *
  * The default in-memory store also handles:
  *   - sampling (per `config.drift.sampleRate`) — done *outside* this module,
@@ -31,29 +38,54 @@
  * A drift event payload is:
  *   {
  *     route:      { method, path },
- *     part:       'body' | 'query',
+ *     part:       'body' | 'query' | 'response',
  *     issues:     Array<{ kind, field, expected?, got? }>,
- *     sampledAt:  number   // ms epoch
+ *     sampledAt:  number,  // ms epoch
+ *     count:      number   // occurrences this event stands for, >= 1 (v1.17)
  *   }
+ *
+ * `count` is the pre-aggregation escape hatch (v1.17): a caller that has
+ * already seen the same signature N times — an external agent collapsing a
+ * flush window, say — reports it once with `count: N` instead of N times.
+ * Omitting it means `1`, which is exactly the behaviour of every release
+ * before it existed.
  */
 
 // ─── Public event factory ────────────────────────────────────────────────────
+
+/**
+ * Coerce a caller-supplied occurrence count to a positive integer.
+ *
+ * One rule, applied in two places (`makeEvent` for events we build, `record`
+ * for events handed to us by someone else), so an event that never passed
+ * through `makeEvent` still counts as at least one occurrence rather than
+ * silently zeroing out the aggregation.
+ *
+ * @param {*} count
+ * @returns {number} `count` when it is an integer >= 1, otherwise 1
+ */
+function normalizeCount(count) {
+  return Number.isInteger(count) && count >= 1 ? count : 1;
+}
 
 /**
  * Build a normalised drift event from raw inputs.
  *
  * @param {string} method
  * @param {string} path
- * @param {string} part           - 'body' or 'query'
+ * @param {string} part           - 'body', 'query' or 'response'
  * @param {Array<object>} issues
- * @returns {{ route: { method: string, path: string }, part: string, issues: Array<object>, sampledAt: number }}
+ * @param {number} [count]        - occurrences this event stands for; anything
+ *                                  that is not an integer >= 1 becomes 1
+ * @returns {{ route: { method: string, path: string }, part: string, issues: Array<object>, sampledAt: number, count: number }}
  */
-function makeEvent(method, path, part, issues) {
+function makeEvent(method, path, part, issues, count) {
   return {
     route: { method: String(method || '').toUpperCase(), path: String(path || '') },
     part: part,
     issues: issues || [],
     sampledAt: Date.now(),
+    count: normalizeCount(count),
   };
 }
 
@@ -134,6 +166,9 @@ function createMemoryStore(config) {
   }
 
   function shouldDedup(event) {
+    // `count` is deliberately absent from the signature: it says how many times
+    // an occurrence happened, not what happened. Two events one window apart
+    // are the same signature whether they carry 1 or 500.
     const sig = keyFor(event.route) + '|' + event.part + '|' +
       event.issues.map(function (i) { return i.kind + ':' + i.field; }).join(',');
     const now = event.sampledAt;
@@ -163,7 +198,10 @@ function createMemoryStore(config) {
         path: event.route.path,
         total: 0,
         kinds: { 'missing-required': 0, 'unexpected-field': 0, 'type-mismatch': 0 },
-        parts: { body: 0, query: 0 },
+        // Seeded with every part the library emits so `/docs/drift.json` reports
+        // the same key set for every route. `record` still uses `|| 0`, so an
+        // unknown part from an external caller widens the map instead of failing.
+        parts: { body: 0, query: 0, response: 0 },
         fields: {}, // field -> count
         firstSeen: event.sampledAt,
         lastSeen: event.sampledAt,
@@ -174,20 +212,26 @@ function createMemoryStore(config) {
       routes.set(key, entry);
     }
 
-    entry.total += event.issues.length;
+    // An event stands for `count` identical occurrences; every counter it feeds
+    // is scaled by it. `count: 1` (the default) reproduces the pre-v1.17 maths
+    // exactly.
+    const count = normalizeCount(event.count);
+    const weight = event.issues.length * count;
+
+    entry.total += weight;
     entry.lastSeen = event.sampledAt;
-    entry.parts[event.part] = (entry.parts[event.part] || 0) + event.issues.length;
+    entry.parts[event.part] = (entry.parts[event.part] || 0) + weight;
 
     for (const issue of event.issues) {
-      entry.kinds[issue.kind] = (entry.kinds[issue.kind] || 0) + 1;
-      entry.fields[issue.field] = (entry.fields[issue.field] || 0) + 1;
+      entry.kinds[issue.kind] = (entry.kinds[issue.kind] || 0) + count;
+      entry.fields[issue.field] = (entry.fields[issue.field] || 0) + count;
     }
 
     // Hourly + daily buckets
     const hk = hourBucketKey(event.sampledAt);
-    entry.buckets[hk] = (entry.buckets[hk] || 0) + event.issues.length;
+    entry.buckets[hk] = (entry.buckets[hk] || 0) + weight;
     const dk = dayBucketKey(event.sampledAt);
-    entry.dailyBuckets[dk] = (entry.dailyBuckets[dk] || 0) + event.issues.length;
+    entry.dailyBuckets[dk] = (entry.dailyBuckets[dk] || 0) + weight;
     pruneOldBuckets(entry);
 
     // Sample buffer (ring)
@@ -243,7 +287,28 @@ function createMemoryStore(config) {
     return routes.size > 0;
   }
 
-  return { record: record, report: report, reset: reset, hasData: hasData };
+  /**
+   * Accept a startup route inventory and do nothing with it.
+   *
+   * The in-memory store reports on drift that actually happened, and every
+   * route it would list is already implied by the events it holds — a local
+   * inventory would have no reader. The method is implemented anyway so the
+   * default store demonstrates the full store interface: an author copying it
+   * as a template sees the optional hook and its signature.
+   *
+   * @param {Array<{ method: string, path: string }>} _routes
+   * @param {{ title?: string, version?: string }} _meta
+   * @returns {void}
+   */
+  function announceRoutes(_routes, _meta) { /* no-op — see docblock */ }
+
+  return {
+    record: record,
+    report: report,
+    reset: reset,
+    hasData: hasData,
+    announceRoutes: announceRoutes,
+  };
 }
 
 // ─── Side-effect helpers ─────────────────────────────────────────────────────

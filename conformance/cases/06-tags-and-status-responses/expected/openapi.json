@@ -1,0 +1,157 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Tagged",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/users": {
+      "post": {
+        "operationId": "post_users",
+        "tags": [
+          "accounts"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    },
+                    "created": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "created"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a user — 201 on create, 200 when it already existed",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/stats": {
+      "get": {
+        "operationId": "get_internal_stats",
+        "tags": [
+          "ops"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "uptime": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "uptime"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Tag declared at document level"
+      }
+    },
+    "/misc/ping": {
+      "get": {
+        "operationId": "get_misc_ping",
+        "tags": [
+          "undeclared"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pong": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "pong"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Tag NOT declared at document level — emitted without metadata"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "accounts",
+      "description": "Account management"
+    },
+    {
+      "name": "ops",
+      "description": "Operator-only endpoints",
+      "externalDocs": {
+        "url": "https://example.com/ops"
+      }
+    },
+    {
+      "name": "undeclared"
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "name": "errors-and-default-errors",
+  "description": "Route-local errors merged with adapter-level defaultErrors. The route wins on a status collision (422 here). Locks description-only errors (no schema → no content) versus schema-bearing errors.",
+  "config": {
+    "meta": {
+      "title": "Errors",
+      "version": "1.0.0"
+    },
+    "defaultErrors": {
+      "401": "Authentication required",
+      "403": "Forbidden",
+      "422": {
+        "description": "GLOBAL validation error — must lose to the route",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "global": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "routes": [
+    {
+      "method": "DELETE",
+      "path": "/posts/:id",
+      "params": [
+        "id"
+      ],
+      "description": "Delete a post",
+      "requestHeaders": null,
+      "requestSchema": {
+        "body": null,
+        "query": null,
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "errors": [
+        {
+          "status": 404,
+          "description": "Post not found",
+          "schema": null
+        },
+        {
+          "status": 422,
+          "description": "ROUTE validation error — must win over defaultErrors",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

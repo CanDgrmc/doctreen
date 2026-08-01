@@ -31,34 +31,12 @@ const { RouteRegistry, normalizeConfig, shouldExclude, inferSchema, parseJSDoc, 
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { createDriftPipeline, authorizeReset } = require('../internal/drift');
-const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, reportResponseIssues } = require('../internal/validate');
+const { attachDriftRuntime, announceToStore, authorizeReset } = require('../internal/drift');
+const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, assertResponse } = require('../internal/validate');
+const { normalizeErrorMap } = require('../internal/errors');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
-
-/**
- * normalizeErrors
- *
- * Converts the user-facing errors map (Record<number, string | { description?, schema? }>)
- * into the internal ErrorEntry[] format.
- *
- * @param {Record<number, string | { description?: string|null, schema?: import('../index').SchemaNode|null }>} errors
- * @returns {import('../index').ErrorEntry[]}
- */
-function normalizeErrors(errors) {
-  return Object.keys(errors).map(function (status) {
-    const value = errors[Number(status)];
-    if (typeof value === 'string') {
-      return { status: Number(status), description: value, schema: null };
-    }
-    return {
-      status: Number(status),
-      description: (value && value.description) || null,
-      schema: (value && value.schema) || null,
-    };
-  });
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -216,7 +194,7 @@ function wrapRouteHandlers(handlerStack, entry, config) {
         entry.requestHeaders = predef.headers;
       }
       if (entry.errors === null && predef.errors) {
-        entry.errors = normalizeErrors(predef.errors);
+        entry.errors = normalizeErrorMap(predef.errors);
       }
       if (predef.validators) {
         entry.requestValidators = predef.validators;
@@ -284,7 +262,7 @@ function wrapRouteHandlers(handlerStack, entry, config) {
           body:   /** @type {any} */ (req).body,
           query:  /** @type {any} */ (req).query,
           params: /** @type {any} */ (req).params,
-        }).then(function (result) {
+        }, currentEntry, config).then(function (result) {
           if (!result.ok) {
             return /** @type {any} */ (res).status(422).json(buildErrorBody(result.issues));
           }
@@ -347,24 +325,24 @@ function wrapRouteHandlers(handlerStack, entry, config) {
               currentEntry.responseSchema = inferSchema(responseBody);
             }
 
-            // ── Response assertion (v1.15 dev-mode) ─────────────────────────
-            const rMode = responseMode(config && config.validate);
-            if (rMode !== 'off') {
-              const rSchema = resolveResponseValidator(currentEntry, /** @type {any} */ (res).statusCode);
-              if (rSchema) {
-                const rv = validateResponse(rSchema, responseBody);
-                if (!rv.ok) {
-                  // Restore json before surfacing so a thrown error (500 in dev)
-                  // or a subsequent send doesn't re-enter this wrapper.
-                  /** @type {any} */ (res).json = originalJson;
-                  reportResponseIssues(rMode, currentEntry.method + ' ' + currentEntry.path, rv.issues);
-                }
-              }
+            // ── Response assertion (v1.15 dev-mode; status-aware v1.16) ─────
+            // Restore json *before* asserting: 'throw' mode raises from inside
+            // assertResponse (surfacing as a 500 in dev), and the error must not
+            // leave this wrapper installed for a subsequent send. Restoring here
+            // also prevents stacking wrappers when json() is called twice on the
+            // same res object.
+            /** @type {any} */ (res).json = originalJson;
+
+            if (responseMode(config && config.validate) !== 'off') {
+              assertResponse(
+                currentEntry,
+                /** @type {any} */ (res).statusCode,
+                responseBody,
+                config,
+                currentEntry.method + ' ' + currentEntry.path
+              );
             }
 
-            // Restore immediately so stacking wrappers can't occur if
-            // json() is called more than once on the same res object.
-            /** @type {any} */ (res).json = originalJson;
             return originalJson.call(res, responseBody);
           };
         }
@@ -516,15 +494,25 @@ function expressAdapter(app, userConfig = {}) {
     return function docMiddlewareDisabled(_req, _res, next) { next(); };
   }
 
-  // Schema drift pipeline (v1.10+). Owns sampling, in-memory store, webhook,
-  // onDrift hook. Attached to config so walkStack-wrapped handlers can dispatch
-  // events; also surfaced via `GET <docsPath>/drift.json` below.
-  config._drift = createDriftPipeline(config);
+  // Drift runtime (v1.10+). Builds `config._drift` — the pipeline that owns
+  // sampling, in-memory store, webhook and the onDrift hook, surfaced via
+  // `GET <docsPath>/drift.json` below — and `config._heartbeat` (v1.17).
+  // Both hang off config so walkStack-wrapped handlers can reach them.
+  attachDriftRuntime(config);
 
   // Wrap handlers immediately so traffic arriving before /docs is visited
   // is still captured. setImmediate defers to the next tick so that all
   // app.use()/app.get()/… calls in the same synchronous block complete first.
-  setImmediate(() => introspectExpressApp(app, registry, config));
+  // That deferred pass is also the point where the route list is settled, so
+  // the drift store's route inventory is announced from the same callback.
+  setImmediate(() => {
+    introspectExpressApp(app, registry, config);
+    // Guarded so a drift-free app pays nothing for a snapshot nobody reads;
+    // announceToStore re-checks, this only skips building its argument.
+    if (config._drift.enabled) {
+      announceToStore(config._drift, registry.getVisible(), config.meta, config.docsPath);
+    }
+  });
 
   return function docMiddleware(req, res, next) {
     if (req.path === config.docsPath + '/__flows/run' || req.url === config.docsPath + '/__flows/run') {

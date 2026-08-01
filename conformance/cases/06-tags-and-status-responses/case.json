@@ -1,0 +1,112 @@
+{
+  "name": "tags-and-status-responses",
+  "description": "Document-level tag metadata, per-route tag overrides, and a status-keyed response map. Locks that a tag used by a route but not declared at the document level is still emitted (without metadata), and that each declared status gets its own schema.",
+  "config": {
+    "meta": {
+      "title": "Tagged",
+      "version": "1.0.0"
+    },
+    "openapi": {
+      "tags": [
+        {
+          "name": "accounts",
+          "description": "Account management"
+        },
+        {
+          "name": "ops",
+          "description": "Operator-only endpoints",
+          "externalDocs": {
+            "url": "https://example.com/ops"
+          }
+        }
+      ]
+    }
+  },
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/users",
+      "params": [],
+      "description": "Create a user — 201 on create, 200 when it already existed",
+      "requestHeaders": null,
+      "requestSchema": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            }
+          }
+        },
+        "query": null,
+        "params": null
+      },
+      "responseSchema": null,
+      "errors": null,
+      "tags": [
+        "accounts"
+      ],
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "number"
+            },
+            "created": {
+              "type": "boolean"
+            }
+          }
+        },
+        "201": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/internal/stats",
+      "params": [],
+      "description": "Tag declared at document level",
+      "requestHeaders": null,
+      "requestSchema": null,
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "uptime": {
+            "type": "number"
+          }
+        }
+      },
+      "errors": null,
+      "tags": [
+        "ops"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/misc/ping",
+      "params": [],
+      "description": "Tag NOT declared at document level — emitted without metadata",
+      "requestHeaders": null,
+      "requestSchema": null,
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "pong": {
+            "type": "boolean"
+          }
+        }
+      },
+      "errors": null,
+      "tags": [
+        "undeclared"
+      ]
+    }
+  ]
+}
