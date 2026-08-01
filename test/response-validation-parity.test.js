@@ -91,11 +91,24 @@ const ROUTES = [
 const META = { title: 'Parity API', version: '1.16.0', description: 'Response parity fixture.' };
 const HOST = '127.0.0.1';
 
-/** Config for the plain warn-mode app used by most assertions. */
+/**
+ * Config for the plain warn-mode app used by most assertions.
+ *
+ * `drift.logLevel: 'silent'` is load-bearing, not tidiness. Since v1.17 a failed
+ * response assertion also feeds the drift pipeline, and the drift store logs its
+ * own `[doctreen] schema drift on …` line. Drift defaults to enabled outside
+ * production at `sampleRate: 0.01`, so a mismatching route emits a *second*
+ * warning roughly 1% of the time — across 3 warning routes × 5 adapters that is
+ * a ~14% chance of a spurious failure per run. Silencing drift keeps these
+ * assertions measuring the response-assertion warning alone, which is what this
+ * file is about; drift's own logging is covered in `response-drift.test.js`.
+ * Drift stays *enabled* so the response-drift path is still exercised here.
+ */
 const WARN_CONFIG = {
   meta: META,
   validate: { response: 'warn' },
   defaultErrors: DEFAULT_ERRORS,
+  drift: { logLevel: 'silent' },
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

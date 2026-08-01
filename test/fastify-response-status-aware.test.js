@@ -73,10 +73,20 @@ async function withWarnCapture(fn) {
  * Build a Fastify app with the adapter installed, register `routes`, and return
  * the ready instance. The adapter must be installed BEFORE routes so its
  * `onRoute` hook captures them.
+ *
+ * Drift logging is silenced because every assertion below counts `console.warn`
+ * calls exactly. Since v1.17 a failed response assertion also feeds the drift
+ * pipeline, whose store logs its own `[doctreen] schema drift on …` line; drift
+ * defaults to enabled outside production at `sampleRate: 0.01`, so a mismatch
+ * would emit a *second* warning about 1% of the time and turn these counts
+ * flaky. `adapterExtra` still wins, so a case may configure drift itself.
  */
 async function buildApp(validate, routes, adapterExtra) {
   const app = Fastify();
-  fastifyAdapter(app, Object.assign({ validate: validate }, adapterExtra || {}));
+  fastifyAdapter(app, Object.assign(
+    { validate: validate, drift: { logLevel: 'silent' } },
+    adapterExtra || {},
+  ));
   routes(app);
   await app.ready();
   return app;
