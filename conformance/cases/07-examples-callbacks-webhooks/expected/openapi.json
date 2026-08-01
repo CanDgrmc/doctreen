@@ -1,0 +1,174 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Events",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/orders": {
+      "post": {
+        "operationId": "post_orders",
+        "tags": [
+          "orders"
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "orderId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "orderId"
+                  ]
+                },
+                "example": {
+                  "orderId": "ord_123"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Place an order",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sku": {
+                    "type": "string"
+                  },
+                  "qty": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "sku",
+                  "qty"
+                ]
+              },
+              "examples": {
+                "single": {
+                  "value": {
+                    "sku": "ABC",
+                    "qty": 1
+                  },
+                  "summary": "One item"
+                },
+                "bulk": {
+                  "value": {
+                    "sku": "ABC",
+                    "qty": 50
+                  },
+                  "summary": "Bulk order"
+                }
+              }
+            }
+          }
+        },
+        "callbacks": {
+          "orderShipped": {
+            "{$request.body#/callbackUrl}": {
+              "post": {
+                "summary": "Sent when the order ships",
+                "requestBody": {
+                  "required": true,
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "orderId": {
+                            "type": "string"
+                          },
+                          "trackingId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "orderId",
+                          "trackingId"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "201": {
+                    "description": "Successful response",
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "type": "object",
+                          "properties": {
+                            "ack": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "ack"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "orders"
+    }
+  ],
+  "webhooks": {
+    "userCreated": {
+      "post": {
+        "summary": "Fired when a user signs up",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "number"
+                  },
+                  "email": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful response"
+          }
+        }
+      }
+    }
+  }
+}

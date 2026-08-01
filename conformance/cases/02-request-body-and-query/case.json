@@ -1,0 +1,103 @@
+{
+  "name": "request-body-and-query",
+  "description": "POST with a body and query. Exercises every SchemaNode modifier: optional, nullable, default, enum, literal, nested array/object. Locks how `required` is derived (optional fields dropped) and how defaults/enums reach the OpenAPI schema.",
+  "config": {
+    "meta": {
+      "title": "Payloads",
+      "version": "2.1.0"
+    }
+  },
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/users",
+      "params": [],
+      "description": "Create a user",
+      "requestHeaders": null,
+      "requestSchema": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "age": {
+              "type": "number",
+              "optional": true
+            },
+            "nickname": {
+              "type": "string",
+              "nullable": true
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "admin",
+                "user"
+              ],
+              "default": "user",
+              "optional": true
+            },
+            "kind": {
+              "type": "string",
+              "const": "person"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "address": {
+              "type": "object",
+              "properties": {
+                "city": {
+                  "type": "string"
+                },
+                "zip": {
+                  "type": "string",
+                  "optional": true
+                }
+              }
+            },
+            "active": {
+              "type": "boolean",
+              "default": true,
+              "optional": true
+            }
+          }
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "dryRun": {
+              "type": "boolean",
+              "optional": true
+            },
+            "limit": {
+              "type": "number",
+              "default": 25,
+              "optional": true
+            }
+          }
+        },
+        "params": null
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "errors": null
+    }
+  ]
+}

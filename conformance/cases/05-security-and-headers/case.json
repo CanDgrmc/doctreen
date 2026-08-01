@@ -1,0 +1,103 @@
+{
+  "name": "security-and-headers",
+  "description": "Global securitySchemes + a document-level security default. Locks three route stances: inherit the default, opt out with `security: []`, and declare a specific scheme. Also locks the rule that a secured operation drops a declared Authorization header from its parameters (the security scheme already documents it) while other headers survive.",
+  "config": {
+    "meta": {
+      "title": "Secured",
+      "version": "1.2.0"
+    },
+    "openapi": {
+      "servers": [
+        {
+          "url": "https://api.example.com",
+          "description": "Production"
+        },
+        {
+          "url": "http://localhost:3000",
+          "description": "Local"
+        }
+      ],
+      "securitySchemes": {
+        "bearerAuth": {
+          "type": "http",
+          "scheme": "bearer",
+          "bearerFormat": "JWT"
+        },
+        "apiKey": {
+          "type": "apiKey",
+          "in": "header",
+          "name": "x-api-key"
+        }
+      },
+      "security": [
+        {
+          "bearerAuth": []
+        }
+      ]
+    }
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/me",
+      "params": [],
+      "description": "Inherits the global bearerAuth requirement",
+      "requestHeaders": {
+        "Authorization": "Bearer <token>",
+        "X-Request-Id": "uuid v4"
+      },
+      "requestSchema": null,
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          }
+        }
+      },
+      "errors": null
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "params": [],
+      "description": "Explicitly public — overrides the global default",
+      "requestHeaders": null,
+      "requestSchema": null,
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "errors": null,
+      "security": []
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/replay",
+      "params": [],
+      "description": "Requires the API-key scheme instead",
+      "requestHeaders": {
+        "Authorization": "Bearer <token>"
+      },
+      "requestSchema": null,
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "queued": {
+            "type": "boolean"
+          }
+        }
+      },
+      "errors": null,
+      "security": [
+        {
+          "apiKey": []
+        }
+      ]
+    }
+  ]
+}

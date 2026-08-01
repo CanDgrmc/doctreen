@@ -13,6 +13,7 @@
  *   codegen types   --from <url|file> --out <path> [--watch [ms]]
  *   codegen client  --from <url|file> --out <path> [--base-url <url>]
  *                                                  [--types-import <path>] [--watch [ms]]
+ *   release stamp   [--out <dir>] [--sha <sha>] [--branch <branch>]
  *
  * `report` hits `<docsUrl>/drift.json` (or `<docsUrl>` if it already ends in
  * `/drift.json`) and prints a human-readable summary. With `--fail-on-mismatch`
@@ -39,6 +40,7 @@ function printRootUsage() {
   console.error('  codegen types  Generate TypeScript type declarations from an OpenAPI doc');
   console.error('  codegen client Generate a typed fetch client from an OpenAPI doc');
   console.error('  emit-openapi   Build a static openapi.json from your app (offline, no server)');
+  console.error('  release stamp  Write .doctreen-release.json at build time (git sha + branch)');
   console.error('');
   console.error('Run `' + PROGRAM + ' <command> --help` for command-specific options.');
 }
@@ -127,6 +129,27 @@ function printCodegenUsage() {
   console.error('  --watch [ms]           Re-generate on change. For URL sources polls every <ms>');
   console.error('                          (default 2000); for files watches via fs.watch.');
   console.error('  -h, --help             Show this help');
+}
+
+function printReleaseStampUsage() {
+  console.error('Usage: ' + PROGRAM + ' release stamp [--out <dir>] [--sha <sha>] [--branch <branch>]');
+  console.error('');
+  console.error('Writes `.doctreen-release.json` so the running app can report WHICH build it is.');
+  console.error('Run it at build time, while `.git` is still around — production images usually');
+  console.error('ship without it, and the agent never shells out to git at runtime.');
+  console.error('');
+  console.error('The sha is looked up in this order, first hit wins:');
+  console.error('  1. --sha');
+  console.error('  2. platform env vars (DOCTREEN_RELEASE, VERCEL_*, RENDER_*, RAILWAY_*, …)');
+  console.error('  3. `git rev-parse HEAD` (branch: `git rev-parse --abbrev-ref HEAD`)');
+  console.error('Nothing found means a build with no identity, so the command exits 1 rather');
+  console.error('than writing a useless stamp.');
+  console.error('');
+  console.error('Options:');
+  console.error('  --out <dir>           Directory to write the stamp into (default: cwd)');
+  console.error('  --sha <sha>           Release sha, overrides env and git');
+  console.error('  --branch <branch>     Branch name, overrides env and git');
+  console.error('  -h, --help            Show this help');
 }
 
 function parseArgs(argv) {
@@ -231,6 +254,22 @@ function parseArgs(argv) {
       else { console.error('Unknown option: ' + a); return { command: 'codegen-help', error: true }; }
     }
     return { command: 'codegen', opts: opts };
+  }
+  if (cmd === 'release') {
+    const sub = args.shift();
+    if (sub === 'stamp') {
+      const opts = { out: null, sha: null, branch: null };
+      while (args.length) {
+        const a = args.shift();
+        if (a === '--out') opts.out = args.shift();
+        else if (a === '--sha') opts.sha = args.shift();
+        else if (a === '--branch') opts.branch = args.shift();
+        else if (a === '-h' || a === '--help') return { command: 'release-stamp-help' };
+        else { console.error('Unknown option: ' + a); return { command: 'release-stamp-help', error: true }; }
+      }
+      return { command: 'release-stamp', opts: opts };
+    }
+    return { command: 'release-stamp-help', error: true };
   }
   if (cmd === 'lint') {
     const sub = args.shift();
@@ -650,6 +689,107 @@ async function runEmitOpenApi(opts) {
   console.error('Wrote ' + outPath + ' (' + count + ' path' + (count === 1 ? '' : 's') + ').');
 }
 
+// ─── release stamp ───────────────────────────────────────────────────────────
+//
+// The build-time half of release attribution; `src/internal/release.js` is the
+// runtime half that reads what is written here. The two rules that shape this
+// command:
+//
+//   - `child_process` is fine HERE. The runtime resolver refuses to fork a
+//     `git rev-parse` because it runs inside the host app's boot path; this
+//     command runs in CI with `.git` present, which is exactly the case the
+//     runtime cannot serve (wiki/plan/04).
+//   - No sha is an ERROR, not a shrug. The runtime is fail-open by design, so a
+//     stamp that never got written degrades silently to "no attribution" months
+//     later. Failing the build is the only moment anyone is watching.
+
+/** Trim a flag value to a usable string, or `null`. Missing `--sha` → `null`. */
+function cleanFlagValue(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/** One `git rev-parse` invocation. Any failure — no git, no repo — is `null`. */
+function gitRevParse(args) {
+  try {
+    const out = require('child_process').execFileSync('git', ['rev-parse'].concat(args), {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 10000,
+    });
+    return cleanFlagValue(String(out));
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Last resort: ask git directly. `--abbrev-ref` answers the literal string
+ * `HEAD` on a detached checkout (every CI that checks out a sha), which is a
+ * non-answer, so it is reported as "no branch" instead.
+ */
+function releaseFromGit() {
+  const sha = gitRevParse(['HEAD']);
+  if (!sha) return null;
+  const branch = gitRevParse(['--abbrev-ref', 'HEAD']);
+  return { sha: sha, branch: branch === 'HEAD' ? null : branch, source: 'git' };
+}
+
+/**
+ * Flags → platform env chain → git. The env chain is not re-listed here: it is
+ * `resolveRelease`'s table, called with no `release` option so its config link
+ * stays out of the way.
+ *
+ * A stamp file already sitting in the output of a previous build is ignored on
+ * purpose — it is this command's own output, and honouring it would let a stale
+ * sha copy itself forward forever. `source` tells us which link answered.
+ *
+ * @param {{ sha: string|null, branch: string|null }} opts
+ * @returns {{ sha: string, branch: string|null, source: string }|null}
+ */
+function detectRelease(opts) {
+  const branchFlag = cleanFlagValue(opts.branch);
+  const shaFlag = cleanFlagValue(opts.sha);
+  if (shaFlag) return { sha: shaFlag, branch: branchFlag, source: 'flag' };
+
+  const { resolveRelease } = require('../src/internal/release');
+  const detected = resolveRelease({});
+  const found = (detected && detected.source !== 'stamp') ? detected : releaseFromGit();
+  if (!found) return null;
+
+  return { sha: found.sha, branch: branchFlag || found.branch, source: found.source };
+}
+
+function runReleaseStamp(opts) {
+  const fs = require('fs');
+  const path = require('path');
+  const { STAMP_FILENAME } = require('../src/internal/release');
+
+  const release = detectRelease(opts);
+  if (!release) {
+    console.error('Error: could not determine a release sha.');
+    console.error('Pass --sha <sha>, set DOCTREEN_RELEASE, or run inside a git repository.');
+    process.exit(1);
+  }
+
+  const outDir = path.resolve(opts.out || process.cwd());
+  const outPath = path.join(outDir, STAMP_FILENAME);
+  const stamp = { sha: release.sha, branch: release.branch, stampedAt: Date.now() };
+
+  try {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(outPath, JSON.stringify(stamp, null, 2) + '\n', 'utf8');
+  } catch (err) {
+    console.error('Error writing ' + outPath + ': ' + (err && err.message));
+    process.exit(2);
+  }
+
+  process.stdout.write(
+    'stamped ' + release.sha + ' (' + (release.branch || 'no branch') + ') → ' + outPath + '\n'
+  );
+}
+
 async function main() {
   const parsed = parseArgs(process.argv);
   switch (parsed.command) {
@@ -667,6 +807,8 @@ async function main() {
     case 'codegen': await runCodegen(parsed.opts); break;
     case 'emit-openapi-help': printEmitOpenApiUsage(); process.exit(parsed.error ? 2 : 0); break;
     case 'emit-openapi': await runEmitOpenApi(parsed.opts); break;
+    case 'release-stamp-help': printReleaseStampUsage(); process.exit(parsed.error ? 2 : 0); break;
+    case 'release-stamp': runReleaseStamp(parsed.opts); break;
     default: printRootUsage(); process.exit(2);
   }
 }

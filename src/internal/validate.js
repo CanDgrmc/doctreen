@@ -16,6 +16,8 @@
  * skipped for that field; the docs UI still works the same.
  */
 
+const { recordResponseDrift } = require('./response-drift');
+
 /**
  * Coerce one Zod issue to our flat shape.
  *
@@ -63,6 +65,32 @@ async function runOne(schema, payload, where) {
 }
 
 /**
+ * Count one request that passed validation (v1.17 heartbeat).
+ *
+ * Lives here, not in the five adapters, because "a request was validated" is
+ * decided in exactly one place — the success return of `validateRequest`. The
+ * heartbeat itself is built and owned elsewhere (`internal/heartbeat.js` via
+ * `internal/drift.js` → `attachDriftRuntime`); this function only knows that
+ * `config._heartbeat` may want to be told, the same way `config._drift` is
+ * reached from the adapters.
+ *
+ * Both arguments are optional so a caller that has no heartbeat to feed pays
+ * one falsy check. When heartbeats are off, `hit` is the no-op of the disabled
+ * instance — there is no Map to grow and no branch to predict.
+ *
+ * Swallows everything: a counter must never be the reason a request fails.
+ *
+ * @param {{ method?: string, path?: string }|undefined} route  - the matched RouteEntry, or any `{method,path}`
+ * @param {{ _heartbeat?: { hit: Function } }|undefined} config - the adapter's normalised config
+ */
+function noteValidated(route, config) {
+  if (!route || !config || !config._heartbeat) return;
+  try {
+    config._heartbeat.hit(route);
+  } catch (_) { /* counting must never break a request */ }
+}
+
+/**
  * Validate a request against the validators stored on a RouteEntry.
  *
  * On success, returns the parsed payload for each part that had a validator
@@ -73,9 +101,15 @@ async function runOne(schema, payload, where) {
  *    Original Zod schemas from `normalizeRouteSchemas`.
  * @param {{ body?: any, query?: any, params?: any }} payload
  *    The actual request payload — e.g. `{ body: req.body, query: req.query, params: req.params }`.
+ * @param {{ method?: string, path?: string }} [route]
+ *    Optional (v1.17). The route this payload belongs to — the matched
+ *    RouteEntry is enough. Together with `config` it feeds the heartbeat.
+ * @param {{ _heartbeat?: { hit: Function } }} [config]
+ *    Optional (v1.17). The adapter's normalised config, carrying `_heartbeat`.
+ *    Omitting either argument keeps the pre-v1.17 behaviour exactly.
  * @returns {Promise<{ ok: true, data: { body?: any, query?: any, params?: any } } | { ok: false, issues: Array<{path:string,message:string,code:string}> }>}
  */
-async function validateRequest(validators, payload) {
+async function validateRequest(validators, payload, route, config) {
   if (!validators) return { ok: true, data: {} };
 
   const issues = [];
@@ -97,7 +131,12 @@ async function validateRequest(validators, payload) {
     if (r.issues.length === 0) data.params = r.data;
   }
 
-  if (issues.length === 0) return { ok: true, data: data };
+  if (issues.length === 0) {
+    // The 422 path below is the only other exit; reaching here means the
+    // request was validated and accepted, which is exactly what a heartbeat counts.
+    noteValidated(route, config);
+    return { ok: true, data: data };
+  }
   return { ok: false, issues: issues };
 }
 
@@ -154,7 +193,11 @@ function buildErrorBody(issues) {
  *
  * @param {any} schema  - original Zod response schema (or null)
  * @param {any} body    - the response payload the handler produced
- * @returns {{ ok: true } | { ok: false, issues: Array<{path:string,message:string,code:string}> }}
+ * @returns {{ ok: true } | { ok: false, issues: Array<{path:string,message:string,code:string}>, raw: Array<any> }}
+ *   `raw` (v1.17) carries the untouched `ZodIssue[]`. Flattening drops
+ *   `expected`/`received`/`keys`, which is exactly what the drift translation
+ *   needs to tell a missing field from a wrong type — so the original list is
+ *   returned alongside rather than reconstructed from the message text.
  */
 function validateResponse(schema, body) {
   if (!schema || typeof schema.safeParse !== 'function') return { ok: true };
@@ -167,10 +210,11 @@ function validateResponse(schema, body) {
     return { ok: true };
   }
   if (result.success) return { ok: true };
-  const issues = ((result.error && result.error.issues) || []).map(function (i) {
+  const raw = (result.error && result.error.issues) || [];
+  const issues = raw.map(function (i) {
     return flattenIssue('response', i);
   });
-  return { ok: false, issues: issues };
+  return { ok: false, issues: issues, raw: raw };
 }
 
 /**
@@ -358,6 +402,88 @@ function reportUndeclaredStatus(label, status) {
 }
 
 /**
+ * Derive `{ method, path }` from a RouteEntry, or null when the entry does not
+ * carry one (NestJS's faux entry is rebuilt from handler metadata and has no
+ * route identity — it passes the route to `assertResponse` explicitly).
+ *
+ * @param {any} entry
+ * @returns {{ method: string, path: string }|null}
+ */
+function routeRefOf(entry) {
+  if (!entry || !entry.path) return null;
+  return { method: entry.method, path: entry.path };
+}
+
+/**
+ * Assert one outgoing response against the contract declared for its ACTUAL
+ * status code, and report the outcome. This is the single entry point every
+ * adapter uses for response assertion (v1.16) — resolution, assertion and
+ * reporting are decided here exactly once, so the five adapters cannot drift
+ * apart again (they did in v1.16: only fastify called `resolveResponseValidator`
+ * correctly).
+ *
+ * Deliberately narrow: it knows nothing about frameworks, requests, or the
+ * request-validation path. Adapters supply the four things only they can know
+ * — the matched RouteEntry, the status actually being sent, the response body,
+ * and a human label — and this function owns everything else.
+ *
+ * Never mutates the body or the status. In `'throw'` mode a failed assertion
+ * throws (adapters surface it as a 500 in development), so callers must undo
+ * any temporary framework patching *before* calling.
+ *
+ * @param {any} entry  - matched RouteEntry (or a faux entry carrying
+ *   `responseValidator` / `responseValidators` / `errors`); null skips.
+ * @param {number|string} status - the status code actually being sent
+ * @param {any} body   - the response payload the handler produced
+ * @param {{ validate?: any, defaultErrors?: Array<any>|null, _drift?: any }} config
+ *   - the adapter's normalised config
+ * @param {string} label - e.g. 'POST /staff'
+ * @param {{ method?: string, path?: string }} [route]
+ *   Optional (v1.17). The route that answered, for the `part: 'response'` drift
+ *   event. Only NestJS needs to pass it: the other four hand in a real
+ *   RouteEntry, which already carries `method`/`path`, while Nest rebuilds a
+ *   faux entry from handler metadata and knows the route only per request.
+ * @returns {{ checked: boolean, ok: boolean, resolution: ResponseResolution|null, issues: Array<{path:string,message:string,code:string}> }}
+ *   `checked` is false when nothing was asserted (mode off, no entry, or no
+ *   schema declared for this status). The resolution is returned so callers —
+ *   and the drift pipeline — can see which contract was applied.
+ */
+function assertResponse(entry, status, body, config, label, route) {
+  const cfg = config || {};
+  const mode = responseMode(cfg.validate);
+  if (mode === 'off' || !entry) {
+    return { checked: false, ok: true, resolution: null, issues: [] };
+  }
+
+  const resolution = resolveResponseValidator(entry, status, {
+    defaultErrors: cfg.defaultErrors,
+    statusAware: isStatusAware(cfg.validate),
+  });
+
+  if (!resolution.validator) {
+    // Nothing to assert. A status declared with only a description stays
+    // silent; a status declared nowhere may raise the opt-in signal.
+    if (!resolution.declared && shouldWarnUndeclaredStatus(cfg.validate)) {
+      reportUndeclaredStatus(label, resolution.status);
+    }
+    return { checked: false, ok: true, resolution: resolution, issues: [] };
+  }
+
+  const rv = validateResponse(resolution.validator, body);
+  if (rv.ok) return { checked: true, ok: true, resolution: resolution, issues: [] };
+
+  // Drift is recorded *before* reporting: 'throw' mode raises from inside
+  // reportResponseIssues, and a mismatch that ends as a 500 is still a mismatch
+  // that happened. Only asserted statuses reach here — an undeclared status has
+  // no contract to drift from, so it emits nothing (T007).
+  recordResponseDrift(cfg, route || routeRefOf(entry), rv.raw);
+
+  // Throws in 'throw' mode; logs in 'warn' mode.
+  reportResponseIssues(mode, label, resolution.status, resolution.source, rv.issues);
+  return { checked: true, ok: false, resolution: resolution, issues: rv.issues };
+}
+
+/**
  * Decide whether validation should run for a given route, combining the
  * adapter-level config with the per-route override stored on the entry.
  *
@@ -407,4 +533,5 @@ module.exports = {
   shouldWarnUndeclaredStatus,
   reportResponseIssues,
   reportUndeclaredStatus,
+  assertResponse,
 };

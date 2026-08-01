@@ -14,35 +14,10 @@ const { RouteRegistry, normalizeConfig, shouldExclude, parseJSDoc, defineSchema,
 const { getUiFlows, runFlowPayload } = require('../flows');
 const { serveDocsUI } = require('../ui/index');
 const { normalizeRouteSchemas } = require('../internal/schemas');
-const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, isStatusAware, shouldWarnUndeclaredStatus, reportResponseIssues, reportUndeclaredStatus } = require('../internal/validate');
-const { createDriftPipeline, authorizeReset } = require('../internal/drift');
+const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, responseMode, assertResponse } = require('../internal/validate');
+const { normalizeErrorMap } = require('../internal/errors');
+const { attachDriftRuntime, announceToStore, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
-
-/**
- * normalizeErrors
- *
- * Converts the user-facing errors map (Record<number, string | { description?, schema? }>)
- * into the internal ErrorEntry[] format.
- *
- * @param {Record<number, string | { description?: string|null, schema?: import('../index').SchemaNode|null }>} errors
- * @returns {import('../index').ErrorEntry[]}
- */
-function normalizeErrors(errors) {
-  return Object.keys(errors).map(function (status) {
-    const value = errors[Number(status)];
-    if (typeof value === 'string') {
-      return { status: Number(status), description: value, schema: null, validator: null };
-    }
-    return {
-      status: Number(status),
-      description: (value && value.description) || null,
-      schema: (value && value.schema) || null,
-      // Original Zod schema (preserved by normalizeRouteSchemas) for
-      // status-aware response assertion (v1.16). null when none/`s.*`-only.
-      validator: (value && value.validator) || null,
-    };
-  });
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -123,7 +98,7 @@ function seedEntryFromHandler(entry, handler, nativeSchema) {
     if (entry.responseSchema === null && predef.response  !== undefined) entry.responseSchema = predef.response;
     if (entry.description    === null && predef.description)             entry.description    = predef.description;
     if (entry.requestHeaders === null && predef.headers)                 entry.requestHeaders = predef.headers;
-    if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrors(predef.errors);
+    if (entry.errors         === null && predef.errors)                  entry.errors         = normalizeErrorMap(predef.errors);
     if (predef.validators)                                               entry.requestValidators = predef.validators;
     if (predef.responseValidator)                                        entry.responseValidator = predef.responseValidator;
     if (predef.responses)                                                entry.responses          = predef.responses;
@@ -222,7 +197,7 @@ function fastifyAdapter(fastify, userConfig) {
   if (!config.enabled) return;
 
   // Schema drift pipeline (v1.10+). See express adapter for details.
-  config._drift = createDriftPipeline(config);
+  attachDriftRuntime(config);
 
   // Capture routes as they are registered
   fastify.addHook('onRoute', function (routeOptions) {
@@ -249,6 +224,18 @@ function fastifyAdapter(fastify, userConfig) {
     }
   });
 
+  // Announce the route inventory once the instance is ready. `onReady` is the
+  // first moment the route list is final: routes registered inside async
+  // plugins land after the current tick, so a setImmediate would miss them.
+  fastify.addHook('onReady', function (done) {
+    // Guarded so a drift-free app pays nothing for a snapshot nobody reads;
+    // announceToStore re-checks, this only skips building its argument.
+    if (config._drift.enabled) {
+      announceToStore(config._drift, registry.getVisible(), config.meta, config.docsPath);
+    }
+    done();
+  });
+
   // ── Runtime validation gate (v1.6+) ─────────────────────────────────────
   // Global preHandler hook — looks up the matching RouteEntry and runs
   // validateRequest when the route declared Zod schemas and validation
@@ -265,7 +252,7 @@ function fastifyAdapter(fastify, userConfig) {
     if (!entry || !entry.requestValidators) return;
     if (!shouldValidate(config.validate, entry.validateOverride)) return;
 
-    const result = await validateRequest(entry.requestValidators, { body: req.body, query: req.query, params: req.params });
+    const result = await validateRequest(entry.requestValidators, { body: req.body, query: req.query, params: req.params }, entry, config);
     if (!result.ok) {
       reply.code(422).send(buildErrorBody(result.issues));
       return;
@@ -285,24 +272,13 @@ function fastifyAdapter(fastify, userConfig) {
   // passes through; 'throw' bubbles a 500 in development. Neither mode ever
   // mutates the body or status.
   fastify.addHook('preSerialization', async function (req, reply, payload) {
-    const rMode = responseMode(config.validate);
-    if (rMode === 'off') return payload;
+    if (responseMode(config.validate) === 'off') return payload;
     const routeMethod = (req.method || '').toUpperCase();
     const routePath   = (req.routeOptions && req.routeOptions.url) || req.routerPath || '';
     if (!routePath) return payload;
     const entry = registry.find(routeMethod, routePath);
     if (!entry) return payload;
-    const label = routeMethod + ' ' + routePath;
-    const resolution = resolveResponseValidator(entry, reply.statusCode, {
-      defaultErrors: config.defaultErrors,
-      statusAware: isStatusAware(config.validate),
-    });
-    if (resolution.validator) {
-      const rv = validateResponse(resolution.validator, payload);
-      if (!rv.ok) reportResponseIssues(rMode, label, resolution.status, resolution.source, rv.issues);
-    } else if (!resolution.declared && shouldWarnUndeclaredStatus(config.validate)) {
-      reportUndeclaredStatus(label, resolution.status);
-    }
+    assertResponse(entry, reply.statusCode, payload, config, routeMethod + ' ' + routePath);
     return payload;
   });
 

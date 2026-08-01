@@ -1,0 +1,68 @@
+{
+  "name": "hidden-and-docspath",
+  "description": "Layering fixture. The exporter strips its own docsPath subtree but does NOT filter `hidden` routes — hiding is the adapter's job, done by passing registry.getVisible(). This case deliberately passes a hidden route and expects it PRESENT, so a port cannot \"helpfully\" move the filter into the wrong layer.",
+  "config": {
+    "meta": {
+      "title": "Layering",
+      "version": "1.0.0"
+    },
+    "docsPath": "/docs"
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/public",
+      "params": [],
+      "description": null,
+      "requestHeaders": null,
+      "requestSchema": null,
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "errors": null
+    },
+    {
+      "method": "GET",
+      "path": "/secret",
+      "params": [],
+      "description": null,
+      "requestHeaders": null,
+      "requestSchema": null,
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "errors": null,
+      "hidden": true
+    },
+    {
+      "method": "GET",
+      "path": "/docs",
+      "params": [],
+      "description": "The docs UI itself — stripped",
+      "requestHeaders": null,
+      "requestSchema": null,
+      "responseSchema": null,
+      "errors": null
+    },
+    {
+      "method": "GET",
+      "path": "/docs/openapi.json",
+      "params": [],
+      "description": "The spec endpoint — stripped",
+      "requestHeaders": null,
+      "requestSchema": null,
+      "responseSchema": null,
+      "errors": null
+    }
+  ]
+}

@@ -5,8 +5,9 @@
 const { RouteRegistry, normalizeConfig, shouldExclude, s, defineSchema } = require('../index');
 const { serveDocsUI } = require('../ui/index');
 const { convertSchema, normalizeRouteSchemas, normalizeResponseField } = require('../internal/schemas');
-const { validateRequest, validateResponse, resolveResponseValidator, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, reportResponseIssues } = require('../internal/validate');
-const { createDriftPipeline, authorizeReset } = require('../internal/drift');
+const { validateRequest, buildErrorBody, shouldValidate, shouldWriteback, applyWriteback, assertResponse } = require('../internal/validate');
+const { normalizeErrorMap } = require('../internal/errors');
+const { attachDriftRuntime, announceToStore, authorizeReset } = require('../internal/drift');
 const { buildOpenApiDocument } = require('../exporters/openapi');
 
 /** Duck-type check for "this is a Zod schema instance". */
@@ -62,6 +63,29 @@ function extractParamsFromPath(path) {
   return params;
 }
 
+/**
+ * Derive `{ method, path }` for the route a request matched.
+ *
+ * The other four adapters hand the RouteEntry itself to the drift pipeline and
+ * the heartbeat, but a NestJS guard only sees the request and the handler's
+ * metadata — never the registry. `req.route.path` is the declared pattern
+ * (`/items/:id`) under the Express platform; Fastify exposes the same string
+ * as `routeOptions.url`. `req.url` is the last resort and carries the concrete
+ * path, which is why it is only reached for when nothing else is present.
+ *
+ * @param {any} req - the platform request behind `context.switchToHttp()`
+ * @returns {{ method: string, path: string }}
+ */
+function routeRefFrom(req) {
+  return {
+    method: String((req && req.method) || '').toUpperCase(),
+    path: (req && req.route && req.route.path)
+      || (req && req.routeOptions && req.routeOptions.url)
+      || (req && req.url)
+      || '',
+  };
+}
+
 // ─── Route seeding ────────────────────────────────────────────────────────────
 
 /**
@@ -101,14 +125,9 @@ function seedEntryFromSchema(entry, docSchema) {
   }
 
   if (docSchema.errors) {
-    entry.errors = Object.keys(docSchema.errors).map(function (statusStr) {
-      const val = docSchema.errors[statusStr];
-      return {
-        status: parseInt(statusStr, 10),
-        description: typeof val === 'string' ? val : (val && val.description) || null,
-        schema: typeof val === 'object' && val && val.schema ? convertSchema(val.schema) : null,
-      };
-    });
+    // Shared with the other four adapters so the original Zod error schemas are
+    // preserved in `validator` for status-aware response assertion (v1.16).
+    entry.errors = normalizeErrorMap(docSchema.errors);
   }
 
   if (docSchema.validate !== undefined) {
@@ -418,7 +437,7 @@ function nestAdapter(app, userConfig) {
   if (!config.enabled) return;
 
   // Schema drift pipeline (v1.10+). See express adapter for details.
-  config._drift = createDriftPipeline(config);
+  attachDriftRuntime(config);
 
   /** @type {import('../index').RouteRegistry|null} */
   let cachedRegistry = null;
@@ -428,6 +447,17 @@ function nestAdapter(app, userConfig) {
       cachedRegistry = discoverRoutes(app, config);
     }
     return cachedRegistry;
+  }
+
+  // Route inventory (v1.17). nestAdapter runs after NestFactory.create(), so
+  // the container already holds every controller; setImmediate only keeps the
+  // work off the bootstrap path. Discovering into a throwaway registry rather
+  // than getRegistry() avoids priming the docs cache before `app.listen()`.
+  // The container walk only happens when drift is on.
+  if (config._drift.enabled) {
+    setImmediate(function () {
+      announceToStore(config._drift, discoverRoutes(app, config).getVisible(), config.meta, config.docsPath);
+    });
   }
 
   const httpAdapter = app.getHttpAdapter();
@@ -512,12 +542,7 @@ function nestAdapter(app, userConfig) {
           const declaredQuery = convertSchema(docSchema.request.query) || null;
           if (!declaredBody && !declaredQuery) return true;
 
-          // NestJS path includes the controller prefix; req.route?.path is the
-          // declared pattern, falling back to url for safety.
-          const route = {
-            method: String(req.method || '').toUpperCase(),
-            path: (req.route && req.route.path) || req.url || '',
-          };
+          const route = routeRefFrom(req);
           if (declaredBody && req.body && typeof req.body === 'object') {
             config._drift.recordIfDrift(route, 'body', declaredBody, req.body);
           }
@@ -558,7 +583,12 @@ function nestAdapter(app, userConfig) {
         const perRoute = docSchema.validate;
         if (!shouldValidate(config.validate, perRoute)) return true;
 
-        const result = await validateRequest(validators, { body: req.body, query: req.query, params: req.params });
+        const result = await validateRequest(
+          validators,
+          { body: req.body, query: req.query, params: req.params },
+          routeRefFrom(req),
+          config
+        );
         if (result.ok) {
           // v1.15 write-back — opt-in via `validate: { writeback: true }`.
           if (shouldWriteback(config.validate)) applyWriteback(req, result.data);
@@ -579,39 +609,61 @@ function nestAdapter(app, userConfig) {
     app.useGlobalGuards(guard);
   }
 
-  // ── Response assertion (v1.15 dev-mode) ───────────────────────────────────
+  // ── Response assertion (v1.15 dev-mode; status-aware v1.16) ───────────────
   // Guards can't see the response, so a global interceptor maps over the
-  // handler's return value and asserts it against the declared Zod response
-  // schema. 'warn' logs; 'throw' errors the stream → NestJS 500 in dev.
+  // handler's return value and hands it to the shared `assertResponse` helper —
+  // the same code path the other four adapters use. 'warn' logs; 'throw' errors
+  // the stream → NestJS 500 in dev.
   if (config.validate.response !== 'off' && typeof app.useGlobalInterceptors === 'function') {
     let mapOp = null;
     try { mapOp = require('rxjs/operators').map; } catch (_) { /* no-op */ }
     if (!mapOp) { try { mapOp = require('rxjs').map; } catch (_) { /* no-op */ } }
 
     if (mapOp) {
-      const rMode = config.validate.response;
+      // Nest reaches the declared contract through handler metadata rather than
+      // the route registry, so the RouteEntry shape `assertResponse` expects is
+      // rebuilt here — memoised per handler, since normalising a schema bag on
+      // every request would be pure waste.
+      const fauxEntries = new WeakMap();
+
+      /** @param {Function} handler @param {any} docSchema */
+      function fauxEntryFor(handler, docSchema) {
+        let faux = fauxEntries.get(handler);
+        if (faux) return faux;
+        const norm = docSchema.response != null
+          ? normalizeResponseField(docSchema.response)
+          : { responseValidator: null, responseValidators: null };
+        faux = {
+          responseValidator:  norm.responseValidator,
+          responseValidators: norm.responseValidators,
+          errors: docSchema.errors ? normalizeErrorMap(docSchema.errors) : null,
+        };
+        fauxEntries.set(handler, faux);
+        return faux;
+      }
+
       const interceptor = {
         intercept(context, next) {
           const handler = context.getHandler();
           const docSchema = handler ? Reflect.getMetadata(DOC_ROUTE_METADATA, handler) : null;
-          if (!docSchema || docSchema.response == null) return next.handle();
-          // Normalise single-or-status-keyed response into validators.
-          const norm = normalizeResponseField(docSchema.response);
-          const faux = { responseValidators: norm.responseValidators, responseValidator: norm.responseValidator };
-          if (!faux.responseValidators && !faux.responseValidator) return next.handle();
+          // A handler with no @DocRoute metadata declares no contract at all —
+          // not even an undeclared-status signal applies to it.
+          if (!docSchema) return next.handle();
+          const faux = fauxEntryFor(handler, docSchema);
           const http = context.switchToHttp();
           const req = http.getRequest();
           const res = http.getResponse();
-          const label = ((req && req.method) || 'GET') + ' ' +
-            ((req && ((req.route && req.route.path) || req.url)) || '');
+          // The faux entry carries the contract but no route identity, so the
+          // route is derived from the request — the same `routeRefFrom` the
+          // guard already feeds the heartbeat, which prefers the declared
+          // pattern (`/items/:id`) over the concrete URL. `assertResponse`
+          // needs it to key the `part: 'response'` drift event.
+          const routeRef = routeRefFrom(req);
+          const label = routeRef.method + ' ' + routeRef.path;
           return next.handle().pipe(mapOp(function (data) {
             const status = (res && res.statusCode) ||
               ((req && req.method === 'POST') ? 201 : 200);
-            const schema = resolveResponseValidator(faux, status);
-            if (schema) {
-              const rv = validateResponse(schema, data);
-              if (!rv.ok) reportResponseIssues(rMode, label, rv.issues);
-            }
+            assertResponse(faux, status, data, config, label, routeRef);
             return data;
           }));
         },

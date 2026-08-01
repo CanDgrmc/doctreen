@@ -7,3 +7,6 @@ vercel.json
 tsconfig.json
 .github
 test
+conformance
+CLAUDE.md
+SPEC.md

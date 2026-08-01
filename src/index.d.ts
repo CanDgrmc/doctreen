@@ -290,7 +290,9 @@ export interface UserConfig {
 
   /**
    * Schema drift detection (v1.10+). Compares actual request payloads
-   * against the declared schema and aggregates mismatches.
+   * against the declared schema and aggregates mismatches. From v1.17 a
+   * response that fails `validate: { response: 'warn' | 'throw' }` is
+   * aggregated too, as `part: 'response'`.
    *
    * Pass `false` to disable, `true` to enable with defaults, or a config
    * object to fine-tune sampling, callbacks, and storage.
@@ -313,11 +315,74 @@ export interface DriftIssue {
 
 export interface DriftEvent {
   route: { method: string; path: string };
-  /** 'body' or 'query' */
+  /**
+   * Which half of the contract drifted: `'body'` or `'query'` for a request
+   * payload, `'response'` (v1.17) for a response that failed the declared
+   * status-aware assertion.
+   */
   part: string;
   issues: DriftIssue[];
   /** ms epoch */
   sampledAt: number;
+  /**
+   * How many identical occurrences this event stands for (v1.17). Always an
+   * integer >= 1; omitted or invalid input normalises to `1`. Every counter the
+   * store keeps is scaled by it, so a pre-aggregating store can report the same
+   * signature once per flush window instead of once per request.
+   */
+  count: number;
+}
+
+/**
+ * One entry of the startup route inventory. Method + path only — the
+ * inventory reports which routes exist, it is not a schema export.
+ */
+export interface RouteInventoryEntry {
+  /** Upper-case HTTP method, e.g. 'POST'. */
+  method: string;
+  /** OpenAPI path form, e.g. '/users/{id}' — matches the OpenAPI export. */
+  path: string;
+}
+
+/** Adapter identity and spec fingerprints passed alongside the route inventory. */
+export interface RouteInventoryMeta {
+  title?: string;
+  version?: string;
+  /**
+   * Behavioural fingerprint of the announced routes (v1.17) — the same value
+   * `computeSpecHashes` returns for them. Moves when a schema, method, path,
+   * error body or security requirement changes; a documentation edit does not
+   * move it. Absent only if hashing failed, which never blocks the
+   * announcement.
+   */
+  contractHash?: string;
+  /** As `contractHash`, but free text counts too — any documented change moves it. */
+  docHash?: string;
+}
+
+/**
+ * Per-class response counters for one heartbeat window (v1.17). Every key is
+ * optional: the whole object is omitted when the window saw no response
+ * statuses at all (e.g. response validation is off).
+ */
+export interface HeartbeatStatusCounts {
+  '2xx'?: number;
+  '4xx'?: number;
+  '5xx'?: number;
+}
+
+/**
+ * One route's traffic during one heartbeat window (v1.17). Counters only —
+ * this is what makes "no drift" distinguishable from "no traffic".
+ * `route` uses the same form as the startup inventory: upper-case method,
+ * OpenAPI path (`/users/{id}`).
+ */
+export interface HeartbeatEntry {
+  route: RouteInventoryEntry;
+  /** Requests that passed request validation on this route in this window. */
+  validatedCount: number;
+  /** Present only when response statuses were observed. */
+  statusCounts?: HeartbeatStatusCounts;
 }
 
 /**
@@ -328,6 +393,25 @@ export interface DriftStore {
   record(event: DriftEvent): void | Promise<void>;
   report(): DriftReport | Promise<DriftReport>;
   reset(): void | Promise<void>;
+  /**
+   * Optional (v1.17). Called once per adapter mount, after the route list
+   * settles, with every visible route — routes marked `hidden` are excluded,
+   * as is the adapter's own `docsPath` subtree.
+   * Lets a store surface routes that no traffic has reached yet. Omit it and
+   * nothing is called; throwing from it cannot affect the host application.
+   * `meta` carries `contractHash` / `docHash` over exactly these routes, so a
+   * store need not (and should not) fingerprint the inventory itself.
+   */
+  announceRoutes?(routes: RouteInventoryEntry[], meta: RouteInventoryMeta): void | Promise<void>;
+  /**
+   * Optional (v1.17). Called when a heartbeat window closes, with one entry
+   * per route that saw validated traffic and the epoch-ms timestamp the window
+   * opened at. Never called with an empty array.
+   * Omit it and counting never starts — the hot path stays free for stores
+   * that only care about drift. Throwing from it cannot affect the host
+   * application, and costs at most the one window it was thrown in.
+   */
+  recordHeartbeats?(entries: HeartbeatEntry[], windowStart: number): void | Promise<void>;
 }
 
 /**
@@ -342,6 +426,7 @@ export interface DriftReport {
     path: string;
     total: number;
     kinds: Record<string, number>;
+    /** Issue weight per contract part — `body`, `query` and `response` (v1.17). */
     parts: Record<string, number>;
     fields: Record<string, number>;
     firstSeen: number;
@@ -358,7 +443,11 @@ export interface DriftReport {
 export interface DriftConfig {
   /** Enable / disable detection. Defaults to `NODE_ENV !== 'production'`. */
   enabled?: boolean;
-  /** Fraction of mismatching requests to record (0–1). Default 0.01. */
+  /**
+   * Fraction of mismatches to record (0–1). Default 0.01. Applies to request
+   * drift (`body`/`query`) and, from v1.17, to response drift as well — one
+   * rate for the whole signal, not one per part.
+   */
   sampleRate?: number;
   /** Per-route sample buffer cap (rolling window). Default 5. */
   maxSamples?: number;
@@ -368,6 +457,16 @@ export interface DriftConfig {
   onDrift?: (event: DriftEvent) => void;
   /** Replace the default in-memory store (e.g. Redis-backed). */
   store?: DriftStore;
+  /**
+   * Per-route heartbeat counters (v1.17). Default `true`, but effectively a
+   * no-op unless `store.recordHeartbeats` exists — so existing setups are
+   * untouched. Set `false` to opt out explicitly.
+   */
+  heartbeat?: boolean;
+  /**
+   * Heartbeat window length in ms. Default 60000, clamped to a 5000 minimum.
+   */
+  heartbeatIntervalMs?: number;
   /** `'warn'` (default) prints a console.warn per unique drift signature. `'silent'` suppresses logs. */
   logLevel?: 'warn' | 'silent';
   /**
@@ -645,5 +744,95 @@ export interface JSDocInfo {
  * Returns `null` if no JSDoc block is found or nothing useful is extracted.
  */
 export declare function parseJSDoc(fn: Function): JSDocInfo | null;
+
+/**
+ * Canonicalisation mode used by the spec hasher (v1.17).
+ *
+ * - `'contract'` — the behavioural contract only: methods, paths, request and
+ *   response schemas, error *schemas*, required/optional flags, types, enum /
+ *   nullable / default values, security requirements, the `hidden` flag.
+ *   Descriptions, summaries and examples are excluded, so a documentation edit
+ *   never moves the hash.
+ * - `'doc'` — everything the route registry holds, free text included.
+ */
+export type SpecHashMode = 'contract' | 'doc';
+
+/**
+ * The two deterministic fingerprints of a route list (v1.17). Both are
+ * `'sha256:' + hex` over a canonical JSON serialisation of the route list:
+ * routes sorted by `METHOD + ' ' + path`, all object keys sorted recursively,
+ * `undefined` dropped and `null` preserved.
+ */
+export interface SpecHashes {
+  /**
+   * The behavioural contract: methods, paths, request / response / error
+   * schemas, required and optional flags, types, enum / nullable / default
+   * values, security requirements, the `hidden` flag. Free text is excluded,
+   * so editing a description never moves it. `'sha256:<hex>'`.
+   */
+  contractHash: string;
+  /**
+   * Everything the registry holds, free text included — any documented change
+   * moves it. `'sha256:<hex>'`.
+   */
+  docHash: string;
+}
+
+/**
+ * Fingerprints a route list — typically `registry.getVisible()` (the published
+ * surface) or `registry.getAll()` (hidden routes included).
+ *
+ * Pure and deterministic: no I/O, no clock, no randomness, and the argument is
+ * never mutated. That is what lets a build step and a live process agree on the
+ * hash for the same code — as long as both hash the *same selection* of routes.
+ * Entries without a `method` or a `path` are skipped, as in the OpenAPI export.
+ *
+ * Mainly for drift stores: `announceRoutes` already receives both hashes on its
+ * `meta` argument, so call this only when hashing a route set of your own.
+ *
+ * @example
+ * const { computeSpecHashes } = require('doctreen');
+ * const { contractHash } = computeSpecHashes(registry.getVisible());
+ */
+export declare function computeSpecHashes(routes: RouteEntry[]): SpecHashes;
+
+/** Options for `resolveRelease`. */
+export interface ResolveReleaseOptions {
+  /** Explicit release; `'auto'` (case-insensitive) means "detect it". Any other string is used verbatim. */
+  release?: string;
+  /** Directory searched first for the `.doctreen-release.json` stamp. Default `process.cwd()`. */
+  cwd?: string;
+  /** Environment override. Default `process.env`. */
+  env?: Record<string, string | undefined>;
+}
+
+/** A resolved release, as returned by `resolveRelease`. */
+export interface ReleaseInfo {
+  /** Git sha, or whatever release name the user configured. */
+  sha: string;
+  /** Branch / ref name, when the platform exposes one. */
+  branch: string | null;
+  /** Which link of the chain answered — `'config'`, `'env:VERCEL'`, `'stamp'`, … */
+  source: string;
+}
+
+/**
+ * Resolve which build of the code is running, for attributing drift to a
+ * deploy (v1.17).
+ *
+ * The chain is walked in a fixed order: explicit `release` option →
+ * `DOCTREEN_RELEASE` → known platform variables (Vercel, Render, Railway,
+ * Heroku, GitHub Actions, `SOURCE_VERSION`) → a `.doctreen-release.json` stamp
+ * written by `doctreen release stamp`. The `.git` directory is never read and
+ * no process is spawned.
+ *
+ * Returns `null` when nothing matches — that is the normal "no release
+ * attribution" state, not an error. Never throws.
+ *
+ * @example
+ * const { resolveRelease } = require('doctreen');
+ * const release = resolveRelease({ release: 'auto' }); // → { sha, branch, source } | null
+ */
+export declare function resolveRelease(options?: ResolveReleaseOptions): ReleaseInfo | null;
 
 export * as flows from './flows/index';
