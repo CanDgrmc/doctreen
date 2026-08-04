@@ -5,7 +5,7 @@
 [**Docs →**](https://doctreen.dev) &nbsp;·&nbsp; [**Live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](https://doctreen.dev/docs/roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
-> **What's new in v1.17.0** &nbsp;—&nbsp; **Heartbeat counters** — one counter per route per window, so "no drift" is finally distinguishable from "no traffic". **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.17.0)**
+> **What's new in v1.18.0** &nbsp;—&nbsp; **`RouteInventoryEntry.schema`** — each announced route now carries its contract as data, in the same canonical projection `contractHash` is computed over. **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.18.0)**
 <!-- whatsnew:end -->
 
 DocTreen is a code-first API documentation library for Node.js. Define your route shape once with Zod (or DocTreen's own schema builder) and you get an interactive docs UI, OpenAPI 3.1 export, runnable integration flows, and 422-on-invalid-request validation — for **Express, Fastify, Hono, Koa, and NestJS**. No router rewrite, no separate spec file, no decorator boilerplate on every DTO field.

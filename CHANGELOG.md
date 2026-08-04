@@ -15,8 +15,9 @@ the hashes it was announced with.
 
 ### Added
 
-- **`RouteInventoryEntry.schema`** — each announced entry now carries its
-  route's contract as data, beside the existing `method` and `path`:
+- **`RouteInventoryEntry.schema`** — each announced route now carries its
+  contract as data, in the same canonical projection `contractHash` is computed
+  over. An inventory entry is no longer just an address:
 
   ```js
   {
