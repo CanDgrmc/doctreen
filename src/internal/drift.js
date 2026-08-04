@@ -20,7 +20,7 @@
 
 const { createMemoryStore, makeEvent, shouldSample, _resetWarnDedup } = require('./drift-store');
 const { createHeartbeat } = require('./heartbeat');
-const { computeSpecHashes } = require('./spec-hash');
+const { canonicalizeRoutes, computeSpecHashes } = require('./spec-hash');
 const { toOpenApiPath } = require('../exporters/openapi');
 
 /**
@@ -252,17 +252,46 @@ function selectAnnouncedRoutes(routes, docsPath) {
  * @returns {Array<{ method: string, path: string }>}
  */
 function buildRouteInventory(routes) {
-  /** @type {Array<{ method: string, path: string }>} */
+  /** @type {Array<{ method: string, path: string, schema?: any }>} */
   const inventory = [];
 
   for (let i = 0; i < routes.length; i++) {
-    inventory.push({
+    const schema = safeRouteSchema(routes[i]);
+    const entry = {
       method: String(routes[i].method || '').toUpperCase(),
       path: toOpenApiPath(routes[i].path),
-    });
+    };
+    // v1.18: the route's contract, in the same canonical projection the spec hashes are taken
+    // over — serialisable, prose-free, no runtime handles. Optional on the wire and absent when
+    // the projection failed, so a pre-1.18 store consumer sees exactly the v1.17 shape.
+    if (schema !== undefined) entry.schema = schema;
+    inventory.push(entry);
   }
 
   return inventory;
+}
+
+/**
+ * One route's contract as data (v1.18): the canonical contract projection, parsed back from the
+ * canonical string so the announced object IS the hashed text, key order included. Same safety
+ * net as `safeSpecHashes` — the projection walks user schema objects (foreign `toJSON`s) on the
+ * startup path, so a route that cannot be projected loses its schema field, never the boot.
+ *
+ * @param {import('../index').RouteEntry} entry
+ * @returns {any|undefined}
+ */
+function safeRouteSchema(entry) {
+  try {
+    const parsed = JSON.parse(canonicalizeRoutes([entry]));
+    const projected = Array.isArray(parsed) ? parsed[0] : undefined;
+    if (!projected || typeof projected !== 'object') return undefined;
+    // method/path already lead the inventory entry; the schema field carries only the contract.
+    delete projected.method;
+    delete projected.path;
+    return projected;
+  } catch (_) {
+    return undefined;
+  }
 }
 
 /**

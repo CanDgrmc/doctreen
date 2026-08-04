@@ -161,7 +161,7 @@ Each adapter also has a fully-typed TS variant (`npm run example:ts`, `:fastify:
 
 ## Roadmap
 
-**Shipped:** runtime validation (v1.6) · OpenAPI 3.1 export (v1.7) · security schemes + hidden routes (v1.8) · `headHtml` (v1.9) · schema drift detection (v1.10) · `$ref` dedup, tags, callbacks/webhooks, examples, `lint openapi` (v1.11) · spec-driven mock server (v1.12) · typed TS codegen + fetch client (v1.13) · schema enums/nullable/defaults (v1.14) · validation completeness — path-param schemas, coerce/default write-back, response assertions, status-keyed responses, `defaultErrors`, Zod `$ref` codegen, offline `emit-openapi` (v1.15) · status-aware response validation (v1.16) · drift observability — heartbeat counters, startup route inventory, response drift, spec hashes, release auto-detect (v1.17)
+**Shipped:** runtime validation (v1.6) · OpenAPI 3.1 export (v1.7) · security schemes + hidden routes (v1.8) · `headHtml` (v1.9) · schema drift detection (v1.10) · `$ref` dedup, tags, callbacks/webhooks, examples, `lint openapi` (v1.11) · spec-driven mock server (v1.12) · typed TS codegen + fetch client (v1.13) · schema enums/nullable/defaults (v1.14) · validation completeness — path-param schemas, coerce/default write-back, response assertions, status-keyed responses, `defaultErrors`, Zod `$ref` codegen, offline `emit-openapi` (v1.15) · status-aware response validation (v1.16) · drift observability — heartbeat counters, startup route inventory, response drift, spec hashes, release auto-detect (v1.17) · contract-carrying route inventory (v1.18)
 
 **Next up:** AI-native endpoints (`/llm.txt`, MCP server) · contract testing & spec diff · `doctreen init` CLI
 

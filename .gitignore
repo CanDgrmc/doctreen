@@ -8,3 +8,4 @@ wiki
 .DS_Store
 CLAUDE.md
 .doctreen-release.json
+_lib_sync*.tar.gz

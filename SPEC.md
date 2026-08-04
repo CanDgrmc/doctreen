@@ -1,6 +1,6 @@
 # DocTreen Route Model v1
 
-**Status:** frozen from `doctreen` v1.17.0 (Node). · **Audience:** anyone implementing
+**Status:** frozen from `doctreen` v1.18.0 (Node). · **Audience:** anyone implementing
 DocTreen in another language.
 
 This document describes the data DocTreen passes between its own layers: the shape of a
@@ -273,8 +273,13 @@ hourly buckets over 24 hours and daily buckets over 7 days. Bucket keys are UTC:
 
 The store interface is `record`, `report`, `reset`, plus an **optional** `announceRoutes`,
 called once per mount with every visible route so a store can surface endpoints no traffic
-has reached yet. Optional means optional: a store without it works, silently, and an
-exception thrown from it must never reach the host application.
+has reached yet. An announced route is its method, its path in OpenAPI form, and an
+optional `schema` holding the route's contract in the same canonical, free-text-free
+projection the contract hash is taken over — so an announcement is self-describing and
+verifiable against the hash announced with it. A route whose contract cannot be projected
+is announced without `schema`, never dropped and never fatal. Optional means optional: a
+store without it works, silently, and an exception thrown from it must never reach the
+host application.
 
 Sampling defaults to 1% of mismatching requests, and detection defaults to off in
 production.
