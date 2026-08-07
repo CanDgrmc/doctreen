@@ -345,7 +345,7 @@ const HIDDEN_KEYS = ['GET /internal/health', 'GET /items/health'];
 
 Object.keys(BUILDERS).forEach(function (adapter) {
   test.describe(adapter + ' route inventory', function () {
-    test.it('announces every visible route exactly once, method + path only', async function () {
+    test.it('announces every visible route exactly once, with its contract as data', async function () {
       const store = createSpyStore();
       const app = await BUILDERS[adapter]({ drift: driftConfig(store) });
 
@@ -355,10 +355,13 @@ Object.keys(BUILDERS).forEach(function (adapter) {
         const call = store.calls[0];
         assert.deepEqual(keysOf(call.routes), EXPECTED);
 
-        // The inventory is not a spec: no schemas, params, descriptions.
+        // v1.18: each entry is method + path + the canonical contract projection — the same
+        // prose-free shape the spec hashes are computed over. No descriptions, no handlers.
         call.routes.forEach(function (route) {
-          assert.deepEqual(Object.keys(route).sort(), ['method', 'path']);
+          assert.deepEqual(Object.keys(route).sort(), ['method', 'path', 'schema']);
           assert.equal(route.method, route.method.toUpperCase());
+          assert.equal(typeof route.schema, 'object');
+          assert.ok(!('description' in (route.schema || {})), 'prose stays out of the schema');
         });
 
         // `description` is configured but must not travel with the inventory;
@@ -472,7 +475,13 @@ test.describe('announceToStore', function () {
     // …and the routes showed up afterwards.
     announceToStore(pipeline, ROUTES, META);
     assert.equal(store.calls.length, 1, 'the later call still lands');
-    assert.deepEqual(store.calls[0].routes, ROUTES);
+    // v1.18: the entries gain the canonical contract projection beside method + path.
+    assert.deepEqual(
+      store.calls[0].routes,
+      ROUTES.map(function (route) {
+        return { method: route.method, path: route.path, schema: {} };
+      }),
+    );
   });
 
   test.it('does not let a rejected promise escape into the process', async function () {

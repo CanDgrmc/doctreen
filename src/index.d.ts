@@ -342,6 +342,12 @@ export interface RouteInventoryEntry {
   method: string;
   /** OpenAPI path form, e.g. '/users/{id}' — matches the OpenAPI export. */
   path: string;
+  /**
+   * The route's contract as data (v1.18): the same canonical, prose-free projection the spec
+   * hashes are computed over — request/response schemas, status-keyed responses, security.
+   * Absent when the projection failed; consumers must treat it as optional.
+   */
+  schema?: unknown;
 }
 
 /** Adapter identity and spec fingerprints passed alongside the route inventory. */

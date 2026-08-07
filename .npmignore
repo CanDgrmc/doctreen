@@ -10,3 +10,5 @@ test
 conformance
 CLAUDE.md
 SPEC.md
+_lib_sync*.tar.gz
+_to_delete

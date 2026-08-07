@@ -4,6 +4,61 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.18.0] — 2026-08-04
+
+The startup route inventory carries the contract, not just the address. In 1.17
+`announceRoutes` reported method and path only — enough for a store to know a
+route existed, never enough to say what it accepted or returned. A store that
+wanted the shape had to fetch the OpenAPI export out of band, which is a second
+transport, a second auth story, and a spec that may already have moved on from
+the hashes it was announced with.
+
+### Added
+
+- **`RouteInventoryEntry.schema`** — each announced route now carries its
+  contract as data, in the same canonical projection `contractHash` is computed
+  over. An inventory entry is no longer just an address:
+
+  ```js
+  {
+    method: 'POST',
+    path: '/users/{id}',
+    schema: { body: { … }, query: { … }, responses: { … }, security: [ … ] }
+  }
+  ```
+
+  It is the **same canonical projection `contractHash` is computed over**, not a
+  second serialisation of the route — request / response / error schemas,
+  status-keyed responses, required and optional flags, types, enum / nullable /
+  default values, security requirements, the `hidden` flag. Free text is
+  excluded, so `description` and `summary` never travel with the inventory; the
+  `meta.contractHash` announced alongside is a fingerprint **of exactly this
+  text**, key order included, so a store can verify what it was handed rather
+  than trust it. Runtime parser handles and cyclic references are dropped, so
+  the entry is plain JSON — no live objects reach the store.
+
+### Changed
+
+- `announceRoutes(routes, meta)` entries gained the `schema` key. Additive: a
+  1.17 consumer reading `method` and `path` sees the same values, and the route
+  selection is unchanged — `hidden` routes and the adapter's own `docsPath`
+  subtree are still excluded. Note that a store which previously received only
+  addresses now receives contract shapes; if a store persists the inventory
+  verbatim, the announced payload is larger than it was in 1.17.
+
+- The field is **optional on the wire and in the types** (`schema?: unknown`).
+  Projecting a route walks user-supplied schema objects — foreign getters and
+  `toJSON` implementations — on the startup path, so a route that cannot be
+  projected loses its `schema` and nothing else. Same fail-open rule the spec
+  hashes already follow: never take down the host app's boot for an
+  observability field.
+
+### Compatibility
+
+No breaking changes and no new runtime dependencies — the package still ships
+zero. `announceRoutes` remains an **optional** store method: a store without it
+is still called for nothing. Node `>=20`.
+
 ## [1.17.0] — 2026-08-01
 
 Observability release. Up to 1.16 a drift store could answer "what broke" and

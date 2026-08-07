@@ -9,3 +9,4 @@ wiki
 CLAUDE.md
 .doctreen-release.json
 _to_delete
+_lib_sync*.tar.gz
