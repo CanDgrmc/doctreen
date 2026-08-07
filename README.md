@@ -2,7 +2,7 @@
 
 **One Zod schema per route. Get docs, integration tests, *and* runtime validation. No OpenAPI YAML.**
 
-[**Docs →**](https://doctreen.dev) &nbsp;·&nbsp; [**Live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](https://doctreen.dev/docs/roadmap) &nbsp;·&nbsp; License: MIT
+[**Docs →**](https://doctreen.dev) &nbsp;·&nbsp; [**Live demo →**](https://demo.doctreen.dev/docs) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/doctreen) &nbsp;·&nbsp; [Python](https://github.com/CanDgrmc/doctreen-py) &nbsp;·&nbsp; [PHP](https://github.com/CanDgrmc/doctreen-php) &nbsp;·&nbsp; [Changelog](./CHANGELOG.md) &nbsp;·&nbsp; [Roadmap](https://doctreen.dev/docs/roadmap) &nbsp;·&nbsp; License: MIT
 
 <!-- whatsnew:start -->
 > **What's new in v1.17.0** &nbsp;—&nbsp; **Heartbeat counters** — one counter per route per window, so "no drift" is finally distinguishable from "no traffic". **[Read the release notes →](https://github.com/CanDgrmc/doctreen/releases/tag/v1.17.0)**
@@ -156,6 +156,18 @@ npm run example:nest        # NestJS TS      → http://localhost:3001/docs
 ```
 
 Each adapter also has a fully-typed TS variant (`npm run example:ts`, `:fastify:ts`, `:hono:ts`, `:koa:ts`).
+
+---
+
+## Other languages
+
+The same contract, implemented twice more. Each is a separate repo with its own release cycle.
+
+**[doctreen-py](https://github.com/CanDgrmc/doctreen-py)** &nbsp;·&nbsp; `pip install doctreen` — Flask, FastAPI / Starlette and Django / DRF, with Pydantic v2 and DRF serializers as schema sources. Checked against this repo's [`conformance/`](./conformance) fixtures on every push: the OpenAPI a given route produces is byte-identical to Node's, key order included.
+
+**[doctreen-php](https://github.com/CanDgrmc/doctreen-php)** &nbsp;·&nbsp; `composer require doctreen/doctreen` — Laravel-first, with Symfony and PSR-15 planned. Early development; its exporter is parity-tested against this package's output.
+
+The contract itself is written down in [`SPEC.md`](./SPEC.md), and the docs UI shares its stylesheet and browser script across all three rather than reproducing them. If your stack spans more than one of these, that is one declaration style, one docs UI and one spec for all of it.
 
 ---
 
