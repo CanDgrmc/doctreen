@@ -334,8 +334,8 @@ export interface DriftEvent {
 }
 
 /**
- * One entry of the startup route inventory. Method + path only — the
- * inventory reports which routes exist, it is not a schema export.
+ * One entry of the startup route inventory: which routes exist, and (since
+ * v1.18) what each one's contract is.
  */
 export interface RouteInventoryEntry {
   /** Upper-case HTTP method, e.g. 'POST'. */
@@ -343,8 +343,14 @@ export interface RouteInventoryEntry {
   /** OpenAPI path form, e.g. '/users/{id}' — matches the OpenAPI export. */
   path: string;
   /**
-   * The route's contract as data (v1.18): the same canonical, prose-free projection the spec
-   * hashes are computed over — request/response schemas, status-keyed responses, security.
+   * The route's contract as data (v1.18): a canonical projection carrying request/response
+   * schemas, status-keyed responses, path params, expected request headers, security, the route
+   * description and every declared error — including the description-only ones.
+   *
+   * Example *bodies* (`example`, `examples`) are excluded (v1.19). They are the only part of a
+   * route definition that is a payload rather than a shape, and the inventory crosses a process
+   * boundary. Everything else the registry holds is here.
+   *
    * Absent when the projection failed; consumers must treat it as optional.
    */
   schema?: unknown;

@@ -239,17 +239,20 @@ function selectAnnouncedRoutes(routes, docsPath) {
 /**
  * Reduce selected routes to the wire shape of a route inventory.
  *
- * Only `{ method, path }` survives: the inventory tells a consumer which
- * routes *exist*, it is not a spec. Schemas, params, descriptions, errors and
- * examples are deliberately dropped here — a route inventory that carried
- * schema bodies would be a second, weaker OpenAPI export.
+ * Through v1.17 only `{ method, path }` survived — the inventory said which routes *exist* and
+ * left the spec to the OpenAPI export. v1.18 attached each route's contract as `schema`, because
+ * a consumer that can only list paths cannot render a page, and asking every user to also publish
+ * an OpenAPI document to get one is a second integration for the same facts.
+ *
+ * What the `schema` field contains is `safeRouteSchema`'s decision, and it is the interesting
+ * one: everything a reader needs, minus example bodies.
  *
  * Paths go through `toOpenApiPath` so `/users/:id` is announced as
  * `/users/{id}` — the same string the OpenAPI export publishes for the same
  * route, which is what lets a consumer join the two by path.
  *
  * @param {Array<import('../index').RouteEntry>} routes - already selected
- * @returns {Array<{ method: string, path: string }>}
+ * @returns {Array<{ method: string, path: string, schema?: any }>}
  */
 function buildRouteInventory(routes) {
   /** @type {Array<{ method: string, path: string, schema?: any }>} */
@@ -261,9 +264,9 @@ function buildRouteInventory(routes) {
       method: String(routes[i].method || '').toUpperCase(),
       path: toOpenApiPath(routes[i].path),
     };
-    // v1.18: the route's contract, in the same canonical projection the spec hashes are taken
-    // over — serialisable, prose-free, no runtime handles. Optional on the wire and absent when
-    // the projection failed, so a pre-1.18 store consumer sees exactly the v1.17 shape.
+    // v1.18: the route's contract as data — serialisable, no runtime handles, and since v1.19
+    // carrying the prose a reader needs (see `safeRouteSchema`). Optional on the wire and absent
+    // when the projection failed, so a pre-1.18 store consumer sees exactly the v1.17 shape.
     if (schema !== undefined) entry.schema = schema;
     inventory.push(entry);
   }
@@ -272,17 +275,32 @@ function buildRouteInventory(routes) {
 }
 
 /**
- * One route's contract as data (v1.18): the canonical contract projection, parsed back from the
- * canonical string so the announced object IS the hashed text, key order included. Same safety
- * net as `safeSpecHashes` — the projection walks user schema objects (foreign `toJSON`s) on the
- * startup path, so a route that cannot be projected loses its schema field, never the boot.
+ * One route's contract as data (v1.18): the canonical `announce` projection, parsed back from the
+ * canonical string so the announced object has a deterministic shape and key order.
+ *
+ * The mode is `announce`, not `contract`. Until v1.19 this used the contract projection on the
+ * grounds that it was "the same text the spec hashes are taken over" — true, and the wrong
+ * property to optimise for. What leaves the process here is a contract meant to be *read*: a
+ * consumer renders it for a human, it is never hashed, and `contractHash` already travels beside
+ * it. The contract projection is deliberately prose-free so that fixing a typo cannot look like a
+ * breaking change, and that same deliberate blindness dropped every route description and every
+ * declared error that carried no schema — `errors: { 401: 'Unauthorized' }` was announced as
+ * nothing at all.
+ *
+ * `announce` is `doc` minus example bodies. Prose is why it is not `contract`; the bodies are why
+ * it is not `doc` — a `RouteExamples` bag holds arbitrary `{ value }` payloads, and this is the
+ * one place in the library where a route's data is handed to somebody else's server.
+ *
+ * Same safety net as `safeSpecHashes` — the projection walks user schema objects (foreign
+ * `toJSON`s) on the startup path, so a route that cannot be projected loses its schema field,
+ * never the boot.
  *
  * @param {import('../index').RouteEntry} entry
  * @returns {any|undefined}
  */
 function safeRouteSchema(entry) {
   try {
-    const parsed = JSON.parse(canonicalizeRoutes([entry]));
+    const parsed = JSON.parse(canonicalizeRoutes([entry], { mode: 'announce' }));
     const projected = Array.isArray(parsed) ? parsed[0] : undefined;
     if (!projected || typeof projected !== 'object') return undefined;
     // method/path already lead the inventory entry; the schema field carries only the contract.

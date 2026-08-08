@@ -14,6 +14,13 @@
  *   - `docHash` — everything the registry holds, free text included. Moves on
  *     any documented change at all.
  *
+ * `canonicalizeRoutes` also serves a third projection that no hash is taken
+ * over: `announce` (v1.19), the shape the startup route inventory is built
+ * from. It is `doc` minus example bodies — prose is why it is not `contract`,
+ * and the bodies are why it is not `doc`. It lives here because it is the same
+ * walk with the same SchemaNode boundary rule, and a second copy of that rule
+ * elsewhere would drift from this one.
+ *
  * The input is the adapter route entry list — exactly what
  * `exporters/openapi.js` consumes (`RouteRegistry#getAll()` /
  * `#getVisible()`), not a separate intermediate format. Which routes take part
@@ -44,6 +51,18 @@ const crypto = require('node:crypto');
  * `description` still counts towards the contract.
  */
 const CONTRACT_META_KEYS = ['description', 'summary', 'example', 'examples'];
+
+/**
+ * Removed in `announce` mode — the subset of `CONTRACT_META_KEYS` that carries
+ * example *bodies* rather than prose (`RouteExamples` holds `{ value }` blobs,
+ * and `callbacks[].examples` holds them one level down).
+ *
+ * `announce` exists because the route inventory leaves the process. Prose is
+ * why the mode is not `contract`; example bodies are why it is not `doc`. A
+ * consumer that wants to render them can ask for `doc` explicitly — this is a
+ * default, not a prohibition.
+ */
+const EXAMPLE_KEYS = ['example', 'examples'];
 
 /**
  * Dropped in BOTH modes. These hold the original Zod schemas kept for runtime
@@ -85,58 +104,54 @@ function isSchemaNode(value) {
 // ─── Mode projections ───────────────────────────────────────────────────────
 
 /**
- * `doc` mode: keep everything the registry carries, minus the runtime parser
- * handles that cannot be serialised.
+ * Which meta keys a mode removes, or `null` for "remove none".
  *
- * @param {any} value
- * @returns {any}
+ * @param {string} mode
+ * @returns {string[]|null}
  */
-function docProjection(value) {
-  return project(value, false);
+function droppedKeys(mode) {
+  if (mode === 'contract') return CONTRACT_META_KEYS;
+  if (mode === 'announce') return EXAMPLE_KEYS;
+  return null;
 }
 
 /**
- * `contract` mode: `doc` minus free text.
- *
- * @param {any} value
- * @returns {any}
- */
-function contractProjection(value) {
-  return project(value, true);
-}
-
-/**
- * Shared walk for both modes. `contract` additionally drops the free-text keys
- * and reduces the two places where prose hides inside a structured value:
- * `errors` (description-only entries carry no contract at all) and
- * `requestHeaders` (a `name → description` map whose *names* are the contract).
+ * Shared walk for every mode. `contract` alone additionally reduces the two
+ * places where prose hides inside a structured value: `errors`
+ * (description-only entries carry no contract at all) and `requestHeaders`
+ * (a `name → description` map whose *names* are the contract). `announce`
+ * deliberately keeps both intact — a reader wants the descriptions, and the
+ * statuses without them are half a sentence.
  *
  * Recursion stops at SchemaNodes — they hold no prose, only shape.
  *
  * @param {any} value
- * @param {boolean} contract
+ * @param {'contract'|'doc'|'announce'} mode
  * @returns {any}
  */
-function project(value, contract) {
+function project(value, mode) {
   if (isSchemaNode(value)) return value;
   if (Array.isArray(value)) {
-    return value.map(function (item) { return project(item, contract); });
+    return value.map(function (item) { return project(item, mode); });
   }
   if (!isPlainish(value)) return value;
+
+  const contract = mode === 'contract';
+  const drop = droppedKeys(mode);
 
   const out = {};
   const keys = Object.keys(value);
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i];
     if (has(RUNTIME_HANDLE_KEYS, key)) continue;
-    if (contract && has(CONTRACT_META_KEYS, key)) continue;
+    if (drop && has(drop, key)) continue;
 
     if (contract && key === 'errors') {
       out.errors = contractErrors(value.errors);
     } else if (contract && (key === 'requestHeaders' || key === 'headers')) {
       out[key] = headerNames(value[key]);
     } else {
-      out[key] = project(value[key], contract);
+      out[key] = project(value[key], mode);
     }
   }
   return out;
@@ -177,7 +192,7 @@ function contractErrors(errors) {
     if (isSchemaNode(value)) { out[codes[i]] = value; continue; }
     if (!isPlainish(value)) continue;
     if (value.schema == null) continue;           // `{ description }` only
-    out[codes[i]] = { schema: project(value.schema, true) };
+    out[codes[i]] = { schema: project(value.schema, 'contract') };
   }
   return out;
 }
@@ -278,12 +293,18 @@ function routeSortKey(entry) {
  * Entries without a `method` or a `path` are skipped, matching the OpenAPI
  * exporter's guard: they cannot be addressed, so they carry no contract.
  *
+ * Three modes, narrowest first: `contract` (the default, and the only one a
+ * hash is taken over), `announce` (contract plus prose, minus example bodies),
+ * `doc` (everything the registry holds). An unrecognised mode falls back to
+ * `contract` — the narrowest, because a typo must not widen what is emitted.
+ *
  * @param {Array<any>} routes - adapter route entries (`RouteRegistry#getAll()`)
- * @param {{ mode?: 'contract'|'doc' }} [options] - defaults to `contract`
+ * @param {{ mode?: 'contract'|'doc'|'announce' }} [options] - defaults to `contract`
  * @returns {string} canonical JSON — `'[]'` for an empty or absent list
  */
 function canonicalizeRoutes(routes, options) {
-  const contract = !(options && options.mode === 'doc');
+  const requested = options && options.mode;
+  const mode = requested === 'doc' || requested === 'announce' ? requested : 'contract';
   const input = Array.isArray(routes) ? routes : [];
 
   const projected = [];
@@ -293,7 +314,7 @@ function canonicalizeRoutes(routes, options) {
     // Copied into a fresh object: the projection may hand back a subtree of
     // the caller's entry by reference, and this function does not mutate its
     // input.
-    projected.push(Object.assign({}, contract ? contractProjection(entry) : docProjection(entry), {
+    projected.push(Object.assign({}, project(entry, mode), {
       method: String(entry.method).toUpperCase(),
       path: String(entry.path),
     }));

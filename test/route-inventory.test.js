@@ -4,10 +4,9 @@
  * Startup route inventory (T005).
  *
  * When an adapter mounts, it tells the drift store which routes exist —
- * `store.announceRoutes(routes, meta)`, once, with `{ method, path }` and
- * nothing else. The point is coverage: a route that has never been called
- * still exists, and a consumer that only ever sees drift events would never
- * learn about it.
+ * `store.announceRoutes(routes, meta)`, once. The point is coverage: a route
+ * that has never been called still exists, and a consumer that only ever sees
+ * drift events would never learn about it.
  *
  * All five adapters delegate to one helper (`announceToStore` in
  * `src/internal/drift.js`), so the contract is asserted once and run against
@@ -15,11 +14,17 @@
  *
  *   1. Content   — every visible route, upper-case method, OpenAPI path form
  *                  (`/items/{id}`, not `/items/:id`), and no other fields.
- *   2. Hidden    — a route marked `hidden` never appears.
- *   3. Optional  — a store without `announceRoutes` is not called, silently.
- *   4. Fail-open — a hook that throws does not disturb the application.
- *   5. Disabled  — drift off means no announcement.
- *   6. Hashes    — `meta` carries `contractHash` / `docHash` over exactly the
+ *   2. Prose     — description, header purposes and every declared error
+ *                  (v1.19). Through v1.18 the inventory carried the *contract*
+ *                  projection, which drops all three by design.
+ *   3. Bodies    — example bodies are the one thing v1.19 still withholds.
+ *   4. Wire      — what the store receives survives `JSON.stringify`; a live
+ *                  Zod object here would fail inside user code and be swallowed.
+ *   5. Hidden    — a route marked `hidden` never appears.
+ *   6. Optional  — a store without `announceRoutes` is not called, silently.
+ *   7. Fail-open — a hook that throws does not disturb the application.
+ *   8. Disabled  — drift off means no announcement.
+ *   9. Hashes    — `meta` carries `contractHash` / `docHash` over exactly the
  *                  announced routes (v1.17), so a store reports the real
  *                  contract instead of fingerprinting the route list.
  *
@@ -34,6 +39,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const { z } = require('zod');
 
 const { createDriftPipeline, announceToStore } = require('../src/internal/drift');
 // Through the package entry point on purpose: this is the function a real
@@ -49,6 +55,31 @@ const META = { title: 'Inventory API', version: '4.2.0', description: 'never ann
  * the announced inventory must be the first three — in OpenAPI path form.
  */
 const EXPECTED = ['GET /items', 'GET /items/{id}', 'POST /items'];
+
+/**
+ * The definition attached to `POST /items` in every fixture — one route
+ * carrying every kind of thing a route definition can hold, so the five
+ * adapters are asked the same question about all of them at once.
+ *
+ * Four of these five fields are the whole of v1.19. Through v1.18 the
+ * inventory announced the *contract* projection, which is prose-free by
+ * design because `contractHash` is taken over it, so:
+ *
+ *   - `description` was dropped;
+ *   - `headers` was reduced to a bare list of names, losing what each is for;
+ *   - `errors[401]`, declared with a description and no schema, was dropped
+ *     whole — the page could not even say the status exists;
+ *   - `errors[422]`, declared WITH a schema, was the one that always survived.
+ *
+ * The fifth is the line v1.19 does not cross: `examples` holds a request
+ * *body*, and the inventory leaves the process.
+ */
+const DOCUMENTED = {
+  description: 'Create an item on behalf of the current customer.',
+  headers: { 'x-idempotency-key': 'a ULID unique to this attempt' },
+  errors: { 401: 'Unauthorized', 422: z.object({ field: z.string() }) },
+  examples: { request: { name: 'a widget', price: 9.99 } },
+};
 
 // ── Test doubles ────────────────────────────────────────────────────────────
 
@@ -86,6 +117,23 @@ function createSpyStore(announceRoutes) {
 /** `'GET /items'`-style keys, sorted, for order-independent comparison. */
 function keysOf(routes) {
   return routes.map(function (r) { return r.method + ' ' + r.path; }).sort();
+}
+
+/**
+ * The announced `schema` for one route of the first (and only) announcement.
+ * Fails loudly rather than returning undefined, so a missing route reads as a
+ * missing route instead of a pile of `cannot read property of undefined`.
+ *
+ * @param {{ calls: Array<{ routes: any }> }} store
+ * @param {string} key - `'POST /items'`
+ * @returns {any}
+ */
+function announced(store, key) {
+  const routes = (store.calls[0] || {}).routes || [];
+  const match = routes.filter(function (r) { return r.method + ' ' + r.path === key; })[0];
+  assert.ok(match, key + ' was not announced; got ' + keysOf(routes).join(', '));
+  assert.ok(match.schema, key + ' was announced without a schema');
+  return match.schema;
 }
 
 /** Build the drift config block for a spy store. */
@@ -169,7 +217,7 @@ async function mountExpress(opts) {
   const ok = function () { return function (_req, res) { res.json({ ok: true }); }; };
 
   app.get('/items', defineRoute(ok(), {}));
-  app.post('/items', defineRoute(ok(), {}));
+  app.post('/items', defineRoute(ok(), DOCUMENTED));
   app.get('/items/:id', defineRoute(ok(), {}));
   app.get('/internal/health', defineRoute(ok(), { hidden: true }));
 
@@ -200,7 +248,7 @@ async function mountFastify(opts) {
 
   const ok = function () { return async function () { return { ok: true }; }; };
   app.get('/items', defineRoute(ok(), {}));
-  app.post('/items', defineRoute(ok(), {}));
+  app.post('/items', defineRoute(ok(), DOCUMENTED));
   app.get('/items/:id', defineRoute(ok(), {}));
   app.get('/internal/health', defineRoute(ok(), { hidden: true }));
 
@@ -226,7 +274,7 @@ async function mountHono(opts) {
 
   const ok = function () { return function (c) { return c.json({ ok: true }); }; };
   app.get('/items', defineRoute(ok(), {}));
-  app.post('/items', defineRoute(ok(), {}));
+  app.post('/items', defineRoute(ok(), DOCUMENTED));
   app.get('/items/:id', defineRoute(ok(), {}));
   app.get('/internal/health', defineRoute(ok(), { hidden: true }));
 
@@ -261,7 +309,7 @@ async function mountKoa(opts) {
 
   const ok = function () { return async function (ctx) { ctx.body = { ok: true }; }; };
   router.get('/items', defineRoute(ok(), {}));
-  router.post('/items', defineRoute(ok(), {}));
+  router.post('/items', defineRoute(ok(), DOCUMENTED));
   router.get('/items/:id', defineRoute(ok(), {}));
   router.get('/internal/health', defineRoute(ok(), { hidden: true }));
 
@@ -307,7 +355,7 @@ async function mountNest(opts) {
   }
 
   decorate('listItems', [Get(), DocRoute({})]);
-  decorate('createItem', [Post(), DocRoute({})]);
+  decorate('createItem', [Post(), DocRoute(DOCUMENTED)]);
   decorate('getItem', [Get(':id'), DocRoute({})]);
   decorate('health', [Get('health'), DocRoute({ hidden: true })]);
 
@@ -355,13 +403,12 @@ Object.keys(BUILDERS).forEach(function (adapter) {
         const call = store.calls[0];
         assert.deepEqual(keysOf(call.routes), EXPECTED);
 
-        // v1.18: each entry is method + path + the canonical contract projection — the same
-        // prose-free shape the spec hashes are computed over. No descriptions, no handlers.
+        // v1.18: each entry is method + path + the route's contract as data. No handlers, no
+        // live Zod objects — see the `announce` projection assertions below for what is in it.
         call.routes.forEach(function (route) {
           assert.deepEqual(Object.keys(route).sort(), ['method', 'path', 'schema']);
           assert.equal(route.method, route.method.toUpperCase());
           assert.equal(typeof route.schema, 'object');
-          assert.ok(!('description' in (route.schema || {})), 'prose stays out of the schema');
         });
 
         // `description` is configured but must not travel with the inventory;
@@ -371,6 +418,67 @@ Object.keys(BUILDERS).forEach(function (adapter) {
         assert.equal(call.meta.version, META.version);
         assert.match(call.meta.contractHash, /^sha256:[0-9a-f]{64}$/);
         assert.match(call.meta.docHash, /^sha256:[0-9a-f]{64}$/);
+      } finally {
+        await app.close();
+      }
+    });
+
+    test.it('announces the prose a reader needs: description, header purposes, every error', async function () {
+      const store = createSpyStore();
+      const app = await BUILDERS[adapter]({ drift: driftConfig(store) });
+
+      try {
+        const schema = announced(store, 'POST /items');
+
+        assert.equal(schema.description, DOCUMENTED.description);
+
+        // The *purpose* of each header, not just its name. The contract projection reduced this
+        // to `['x-idempotency-key']`, which tells a reader nothing they could act on.
+        assert.deepEqual(schema.requestHeaders, DOCUMENTED.headers);
+
+        // Both declared errors, including the one with no schema. Through v1.18 this array held
+        // only the 422 — a page could not say that a 401 was even possible.
+        const errors = schema.errors.slice().sort(function (a, b) { return a.status - b.status; });
+        assert.deepEqual(errors.map(function (e) { return e.status; }), [401, 422]);
+        assert.equal(errors[0].description, 'Unauthorized');
+        assert.equal(errors[0].schema, null, 'a description-only error declares no body');
+        assert.equal(errors[1].schema.type, 'object', 'the schema-carrying error keeps its schema');
+        assert.deepEqual(Object.keys(errors[1].schema.properties), ['field']);
+      } finally {
+        await app.close();
+      }
+    });
+
+    test.it('does not announce example bodies', async function () {
+      const store = createSpyStore();
+      const app = await BUILDERS[adapter]({ drift: driftConfig(store) });
+
+      try {
+        const schema = announced(store, 'POST /items');
+
+        assert.ok(!('examples' in schema), 'examples must not cross the process boundary');
+        assert.ok(!('example' in schema));
+
+        // Belt and braces: the value inside the bag must not appear anywhere in the announcement,
+        // however it were nested. A key-name check alone would miss a future field that inlines it.
+        const wire = JSON.stringify(store.calls[0].routes);
+        assert.ok(wire.indexOf('a widget') === -1, 'an example body leaked into the inventory');
+      } finally {
+        await app.close();
+      }
+    });
+
+    test.it('announces something a store can serialise', async function () {
+      const store = createSpyStore();
+      const app = await BUILDERS[adapter]({ drift: driftConfig(store) });
+
+      try {
+        // The reason this matters is not tidiness: a store that cannot stringify what it was
+        // handed throws inside `announceRoutes`, and `announceToStore` swallows that — so the
+        // symptom would be a silently empty inventory, not an error anyone sees.
+        const wire = JSON.stringify(store.calls[0].routes);
+        assert.deepEqual(keysOf(JSON.parse(wire)), EXPECTED);
+        assert.ok(wire.indexOf('_def') === -1, 'a live Zod object reached the wire');
       } finally {
         await app.close();
       }

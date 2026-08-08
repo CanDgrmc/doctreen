@@ -395,7 +395,113 @@ test('canonicalizeRoutes emits sorted, undefined-free JSON and defaults to contr
   assert.ok(canonicalizeRoutes(list, { mode: 'doc' }).indexOf('description') !== -1);
 });
 
-// ── 5. Public surface ───────────────────────────────────────────────────────
+// ── 5. The `announce` projection ────────────────────────────────────────────
+
+/**
+ * `announce` (v1.19) is the projection the startup route inventory is built
+ * from — see `safeRouteSchema` in `internal/drift.js`. It is not hashed, and
+ * that is the point: `contract` is prose-free because a hash may not move when
+ * somebody fixes a typo, and applying that same blindness to a payload meant
+ * to be *read* cost every description and every schema-less error.
+ *
+ * It sits strictly between the other two: `contract` ⊂ `announce` ⊂ `doc`.
+ */
+
+/** The three canonical projections of one route list, parsed. */
+function projections(list) {
+  return {
+    contract: JSON.parse(canonicalizeRoutes(list, { mode: 'contract' })),
+    announce: JSON.parse(canonicalizeRoutes(list, { mode: 'announce' })),
+    doc: JSON.parse(canonicalizeRoutes(list, { mode: 'doc' })),
+  };
+}
+
+/** The `POST /users` entry of a projection — the fixture route carrying everything. */
+function postUsers(projected) {
+  return projected.filter(function (r) { return r.method + ' ' + r.path === 'POST /users'; })[0];
+}
+
+test('announce carries the prose the contract projection is required to drop', function () {
+  const p = projections(routes());
+
+  assert.equal(postUsers(p.contract).description, undefined);
+  assert.equal(postUsers(p.announce).description, 'Create a user');
+  assert.equal(postUsers(p.doc).description, 'Create a user');
+
+  // `requestHeaders` is a `name → what it is for` map. Contract mode keeps only
+  // the names, because renaming a header is a contract change and rewording its
+  // note is not. A reader needs the note.
+  const listing = p.contract.filter(function (r) { return r.path === '/users' && r.method === 'GET'; })[0];
+  const readable = p.announce.filter(function (r) { return r.path === '/users' && r.method === 'GET'; })[0];
+  assert.deepEqual(listing.requestHeaders, ['Authorization']);
+  assert.deepEqual(readable.requestHeaders, { Authorization: 'Bearer <token>' });
+});
+
+test('announce keeps a declared error that has no schema', function () {
+  const p = projections(routes());
+
+  // The fixture declares two: a 409 with a body and a 422 without. Contract mode
+  // keeps only the 409, because a status with no body declares no contract —
+  // true for a hash, useless for a page listing what can go wrong.
+  assert.deepEqual(postUsers(p.contract).errors.map(function (e) { return e.status; }), [409]);
+  assert.deepEqual(postUsers(p.announce).errors.map(function (e) { return e.status; }), [409, 422]);
+
+  const unschemad = postUsers(p.announce).errors[1];
+  assert.equal(unschemad.description, 'Validation failed');
+  assert.equal(unschemad.schema, null);
+
+  // …and the one that does carry a body still carries it.
+  assert.equal(postUsers(p.announce).errors[0].schema.type, 'object');
+});
+
+test('announce drops example bodies, which doc keeps', function () {
+  const p = projections(routes());
+
+  assert.deepEqual(postUsers(p.doc).examples, { request: { name: 'Alice', email: 'alice@example.com' } });
+  assert.equal(postUsers(p.announce).examples, undefined);
+
+  // Not just the key — the value. This projection crosses a process boundary,
+  // and a future field that inlined an example would pass a key-name check.
+  assert.equal(canonicalizeRoutes(routes(), { mode: 'announce' }).indexOf('alice@example.com'), -1);
+});
+
+test('an unrecognised mode narrows to contract rather than widening to doc', function () {
+  // A typo in a caller's options object must lose information, never leak it.
+  const contract = canonicalizeRoutes(routes(), { mode: 'contract' });
+  assert.equal(canonicalizeRoutes(routes(), { mode: 'Doc' }), contract);
+  assert.equal(canonicalizeRoutes(routes(), { mode: 'announce ' }), contract);
+  assert.equal(canonicalizeRoutes(routes(), {}), contract);
+});
+
+test('adding a third mode left the two hashed projections alone', function () {
+  // The regression that would matter most, and the one a moving hash reports
+  // only after the fact: every key `contract` announces must still be announced
+  // by both wider modes, with the same value.
+  const p = projections(routes());
+
+  for (let i = 0; i < p.contract.length; i++) {
+    const narrow = p.contract[i];
+    const middle = p.announce[i];
+    const wide = p.doc[i];
+    assert.equal(narrow.method + ' ' + narrow.path, middle.method + ' ' + middle.path);
+
+    Object.keys(narrow).forEach(function (key) {
+      // `errors` and `requestHeaders` are the two keys contract deliberately
+      // reduces, so they are compared by presence rather than by value.
+      if (key === 'errors' || key === 'requestHeaders') {
+        assert.ok(key in middle && key in wide, key + ' vanished from a wider mode');
+        return;
+      }
+      assert.deepEqual(middle[key], narrow[key], key + ' differs between contract and announce');
+      assert.deepEqual(wide[key], narrow[key], key + ' differs between contract and doc');
+    });
+  }
+
+  // And the hashes are still taken over exactly two of the three.
+  assert.deepEqual(computeSpecHashes(routes()), BASE);
+});
+
+// ── 6. Public surface ───────────────────────────────────────────────────────
 
 test('computeSpecHashes is reachable from the package entry point, the module is not', function () {
   // A drift store lives outside this package and reaches the library the only
