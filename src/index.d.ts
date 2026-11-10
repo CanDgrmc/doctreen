@@ -308,6 +308,12 @@ export interface UserConfig {
 export interface DriftIssue {
   /** 'missing-required' | 'unexpected-field' | 'type-mismatch' */
   kind: string;
+  /**
+   * The top-level field that drifted. Nested paths fold onto their root
+   * (`user.address.city` → `'user'`). When the payload root is an array, the
+   * top level is an element's: leading indices fold to `[]` (v1.20), so
+   * `[4].email` → `'[].email'` and a wrong-shaped element itself → `'[]'`.
+   */
   field: string;
   expected?: string;
   got?: string;

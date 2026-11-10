@@ -4,6 +4,40 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.20.0] — 2026-11-10
+
+Response drift on an array-rooted response names the field that drifted
+instead of the element it happened in. Through 1.19 the fold onto the
+top-level field took the first path segment, and for a response like
+`Staff[]` that segment is an index: `[4].email` was reported as `field: '4'`.
+The name that drifted never left the process, and every element became its
+own signature — the same mismatch on elements 0, 3 and 7 was three drift
+facts instead of one.
+
+### Changed
+
+- **Leading array indices fold to `[]` and the fold lands on the element's
+  field** — `[4].email` is now reported as `field: '[].email'`.
+
+  `expected`/`got` are kept when the element field itself is the leaf:
+
+  | Zod issue path        | 1.19        | 1.20         |
+  |-----------------------|-------------|--------------|
+  | `[4, 'email']`        | `'4'`       | `'[].email'` |
+  | `[4, 'user', 'city']` | `'4'`       | `'[].user'`  |
+  | `[4]`                 | `'4'`       | `'[]'`       |
+  | `[2, 0, 'id']`        | `'2'`       | `'[][].id'`  |
+  | `['items', 3, 'x']`   | `'items'`   | `'items'`    |
+
+  Only **leading** indices fold: an array inside an object still reports the
+  object's field, exactly as before. Zod reports indices as numbers and keys
+  as strings, so an object key spelled `"4"` remains a field name.
+
+  A drift store keyed on `field` sees fewer, better-named signatures for
+  array-rooted responses and no change for any other route. Signatures it
+  already holds under a bare index will not match the new names; DocTreen
+  Cloud folds those onto `[]` on its side.
+
 ## [1.19.0] — 2026-11-10
 
 The route inventory announces a contract meant to be read, not one meant to be

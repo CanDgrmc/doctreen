@@ -26,6 +26,14 @@
  *   2. A mismatch on the response root itself (`path: []`) has no top-level
  *      field to attribute and is dropped, exactly as `diffShape` returns no
  *      issues for a non-object payload.
+ *   3. (v1.20) When the response root is an ARRAY, "top level" means the top
+ *      level of an element. Leading element indices are not field names: they
+ *      fold to `[]`, and the fold lands on the element's own field —
+ *      `[4, 'email']` is reported as `field: '[].email'`. Before v1.20 the
+ *      index itself was the field (`'4'`), which lost the name that drifted
+ *      and made the same drift on elements 0, 3 and 7 three signatures (and
+ *      three alerts) instead of one. Only LEADING indices fold: in
+ *      `items.3.price` the root segment is `items`, as it always was.
  *
  * Drift events carry no payload values — only field names, kinds and type
  * names — and that invariant is preserved here: `expected`/`got` come from
@@ -33,14 +41,36 @@
  */
 
 /**
- * Fold one Zod issue path onto the top-level field it belongs to.
+ * Fold one Zod issue path onto the top-level field it belongs to (rules 1–3).
+ *
+ * Zod reports array indices as numbers and object keys as strings, so
+ * `typeof === 'number'` is exact: an object key that happens to be `"4"` is a
+ * real field name and stays one.
  *
  * @param {any} path - `issue.path`
- * @returns {string} the root segment, or '' when the issue is on the root
+ * @returns {{ field: string, leaf: boolean }} `field` is '' when the issue is
+ *   on the payload root itself; `leaf` is true when the issue describes the
+ *   folded field directly (so its `expected`/`got` are about that field).
  */
-function rootField(path) {
-  if (!Array.isArray(path) || path.length === 0) return '';
-  return String(path[0]);
+function foldPath(path) {
+  if (!Array.isArray(path) || path.length === 0) return { field: '', leaf: false };
+
+  let elements = '';
+  let at = 0;
+  while (at < path.length && typeof path[at] === 'number') {
+    elements += '[]';
+    at++;
+  }
+
+  // The element itself is the wrong shape (`[3]` is null, say): the element
+  // is the thing that drifted, and the issue describes it directly.
+  if (at === path.length) return { field: elements, leaf: true };
+
+  const name = String(path[at]);
+  return {
+    field: elements ? elements + '.' + name : name,
+    leaf: at === path.length - 1,
+  };
 }
 
 /**
@@ -51,14 +81,15 @@ function rootField(path) {
  * @returns {{ kind: string, field: string, expected?: string, got?: string }|null}
  */
 function translateIssue(issue) {
-  const path = issue && issue.path;
-  const field = rootField(path);
+  const folded = foldPath(issue && issue.path);
+  const field = folded.field;
   if (!field) return null;
 
-  // Depth > 1: the detail belongs to a nested leaf. Reporting it against the
-  // top-level field would attribute the wrong type (or claim `user` is missing
-  // when only `user.address` is), so only the shape mismatch survives the fold.
-  if (path.length > 1) return { kind: 'type-mismatch', field: field };
+  // Below the top level: the detail belongs to a nested leaf. Reporting it
+  // against the top-level field would attribute the wrong type (or claim
+  // `user` is missing when only `user.address` is), so only the shape mismatch
+  // survives the fold.
+  if (!folded.leaf) return { kind: 'type-mismatch', field: field };
 
   if (issue.code === 'invalid_type') {
     // Zod reports an absent property as `received: 'undefined'` rather than a
@@ -87,12 +118,14 @@ function translateIssue(issue) {
  * @param {Array<{ kind: string, field: string }>} out
  */
 function translateUnrecognizedKeys(issue, out) {
-  const nested = rootField(issue.path);
+  const path = Array.isArray(issue.path) ? issue.path : [];
   const keys = Array.isArray(issue.keys) ? issue.keys : [];
   for (let i = 0; i < keys.length; i++) {
-    // Extra keys inside a nested object fold onto that object's top-level name;
-    // at the root the key *is* the top-level field.
-    out.push({ kind: 'unexpected-field', field: nested || String(keys[i]) });
+    // The key is one more segment of the path, so it folds by the same rule:
+    // inside a nested object onto that object's top-level name, at the root
+    // the key *is* the top-level field, and inside an array element it is the
+    // element's field (`[].extra`).
+    out.push({ kind: 'unexpected-field', field: foldPath(path.concat([String(keys[i])])).field });
   }
 }
 

@@ -572,6 +572,57 @@ test('toDriftIssues drops issues with no top-level field to name', () => {
   assert.deepEqual(toDriftIssues([null]), []);
 });
 
+test('toDriftIssues names the element field when the response root is an array (v1.20)', () => {
+  const StaffList = z.array(Staff);
+
+  // The element's own top-level field, with its types — not the index.
+  assert.deepEqual(
+    driftIssuesFor(StaffList, [VALID_STAFF, VALID_STAFF, VALID_STAFF, VALID_STAFF, { id: 'x', name: 'Ada', isActive: true }]),
+    [{ kind: 'type-mismatch', field: '[].id', expected: 'number', got: 'string' }],
+  );
+
+  // The same drift on three elements is ONE fact, not three signatures.
+  assert.deepEqual(
+    driftIssuesFor(StaffList, [{ id: 1, name: 'A' }, VALID_STAFF, { id: 2, name: 'B' }, { id: 3, name: 'C' }]),
+    [{ kind: 'missing-required', field: '[].isActive', expected: 'boolean' }],
+  );
+
+  // A nested leaf inside an element folds onto the element's field, without types.
+  assert.deepEqual(driftIssuesFor(z.array(Nested), [{ user: { address: { city: 5 } } }]), [
+    { kind: 'type-mismatch', field: '[].user' },
+  ]);
+
+  // The element itself is the wrong shape: the element is what drifted, and the
+  // issue describes it directly.
+  assert.deepEqual(driftIssuesFor(StaffList, [VALID_STAFF, null]), [
+    { kind: 'type-mismatch', field: '[]', expected: 'object', got: 'null' },
+  ]);
+
+  // Arrays of arrays keep one `[]` per level.
+  assert.deepEqual(driftIssuesFor(z.array(z.array(Staff)), [[VALID_STAFF, { id: 'x', name: 'A', isActive: true }]]), [
+    { kind: 'type-mismatch', field: '[][].id', expected: 'number', got: 'string' },
+  ]);
+
+  // Extra keys on a strict element are the element's fields.
+  assert.deepEqual(driftIssuesFor(z.array(Staff.strict()), [Object.assign({ extra: 1 }, VALID_STAFF)]), [
+    { kind: 'unexpected-field', field: '[].extra' },
+  ]);
+});
+
+test('toDriftIssues only folds LEADING indices — an array inside an object keeps its field', () => {
+  const Order = z.object({ items: z.array(z.object({ price: z.number() })) });
+  assert.deepEqual(driftIssuesFor(Order, { items: [{ price: 1 }, { price: 'x' }] }), [
+    { kind: 'type-mismatch', field: 'items' },
+  ]);
+
+  // An object key spelled like a number is a real field name: Zod reports it
+  // as a string, so it is not mistaken for an index.
+  const Keyed = z.object({ 4: z.string() });
+  assert.deepEqual(driftIssuesFor(Keyed, { 4: 1 }), [
+    { kind: 'type-mismatch', field: '4', expected: 'string', got: 'number' },
+  ]);
+});
+
 test('toDriftIssues reports a failed refinement as type-mismatch on its field', () => {
   const Constrained = z.object({ name: z.string().min(3), email: z.string().email() });
   assert.deepEqual(driftIssuesFor(Constrained, { name: 'a', email: 'nope' }), [
