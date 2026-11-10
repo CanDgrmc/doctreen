@@ -4,6 +4,78 @@ All notable changes to this project are documented here. This file follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.19.0] — 2026-11-10
+
+The route inventory announces a contract meant to be read, not one meant to be
+hashed. 1.18 built each entry's `schema` from the `contract` projection — the
+prose-free text `contractHash` is taken over. That projection is blind to free
+text on purpose, so that fixing a typo never reads as a breaking change, and
+using it for the announcement applied the same blindness to a payload whose
+only reader is a human: route descriptions never left the process, expected
+request headers arrived as a bare list of names, and a declared error with no
+schema (`errors: { 401: 'Unauthorized' }`) was not announced at all.
+
+### Changed
+
+- **`RouteInventoryEntry.schema` now carries the prose a reader needs.** It is
+  built from a new `announce` projection instead of `contract`, which is
+  everything the registry holds minus example bodies:
+
+  ```js
+  {
+    method: 'POST',
+    path: '/users/{id}',
+    schema: {
+      description: 'Create a user',
+      requestHeaders: { 'x-tenant': 'Tenant id' },
+      errors: { 401: 'Unauthorized', 422: { description: '…', schema: { … } } },
+      body: { … }, responses: { … }, security: [ … ]
+    }
+  }
+  ```
+
+  Three things differ from 1.18, and a store that reads `schema` should check
+  each: route `description` / `summary` are present; `requestHeaders` is the
+  declared `name → description` map, **not an array of names**; and `errors`
+  keeps description-only entries, so a value may be a plain string as well as a
+  `{ description, schema }` object.
+
+- **`schema` is no longer the text `contractHash` is computed over.** 1.18
+  documented the announced object as byte-for-byte the hashed projection, so a
+  store could re-hash what it was handed. That no longer holds: the hash is
+  still taken over `contract`, the entry is `announce`. `meta.contractHash` and
+  `meta.docHash` are **byte-identical to 1.18** for the same routes — the
+  hashed projections did not change, only which one is announced.
+
+- **Route descriptions now leave the process.** 1.18 promised that
+  `description` and `summary` never travel with the inventory; from 1.19 they
+  do, along with header and error descriptions. Example bodies (`example`,
+  `examples`, including those under `callbacks`) still do not — they are the
+  only part of a route definition that is a payload rather than a shape, and
+  the inventory is the one place a route's data is handed to somebody else's
+  server. If your descriptions hold anything you would not send to your drift
+  store, that is worth a look before upgrading.
+
+### Added
+
+- **`announce` mode in the canonical projection** — `contract` ⊂ `announce` ⊂
+  `doc`. Internal to the inventory; no hash is taken over it. An unrecognised
+  mode falls back to `contract`, the narrowest, so a typo can only ever emit
+  less.
+
+- README: an **Other languages** section linking
+  [doctreen-py](https://github.com/CanDgrmc/doctreen-py) and
+  [doctreen-php](https://github.com/CanDgrmc/doctreen-php).
+
+### Compatibility
+
+No API changes and no new runtime dependencies — the package still ships zero.
+`method` and `path` are unchanged, `schema` is still optional on the wire and
+in the types (`schema?: unknown`), and a route that cannot be projected still
+loses its `schema` and nothing else. The shape *inside* `schema` changed as
+described above; a store that ignores `schema`, or passes it through opaquely,
+needs nothing. Node `>=20`.
+
 ## [1.18.0] — 2026-08-04
 
 The startup route inventory carries the contract, not just the address. In 1.17
