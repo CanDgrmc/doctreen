@@ -18,8 +18,8 @@ schema (`errors: { 401: 'Unauthorized' }`) was not announced at all.
 ### Changed
 
 - **`RouteInventoryEntry.schema` now carries the prose a reader needs.** It is
-  built from a new `announce` projection instead of `contract`, which is
-  everything the registry holds minus example bodies:
+  built from a new `announce` projection instead of `contract` — everything
+  the registry holds minus example bodies.
 
   ```js
   {
