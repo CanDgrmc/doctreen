@@ -17,8 +17,9 @@ facts instead of one.
 ### Changed
 
 - **Leading array indices fold to `[]` and the fold lands on the element's
-  field.** `[4].email` is reported as `field: '[].email'`, with its
-  `expected`/`got` when the element field itself is the leaf:
+  field** — `[4].email` is now reported as `field: '[].email'`.
+
+  `expected`/`got` are kept when the element field itself is the leaf:
 
   | Zod issue path        | 1.19        | 1.20         |
   |-----------------------|-------------|--------------|
